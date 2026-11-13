@@ -326,8 +326,8 @@ struct AgentThreadView: View {
                             QueuedBubble(text: text, note: "Waiting for the agent to read it",
                                          onSendNow: canSendNow ? { await store.sendQueuedNow(session.id) } : nil)
                         }
-                        ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, text in
-                            QueuedBubble(text: text, note: "Queued: it reaches the agent when its turn ends")
+                        ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, message in
+                            QueuedBubble(text: message.label, note: "Queued: it reaches the agent when its turn ends")
                         }
                         // The question is part of the conversation, so it
                         // scrolls with it and is never squeezed to fit.

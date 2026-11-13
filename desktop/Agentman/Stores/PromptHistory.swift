@@ -133,6 +133,13 @@ final class PromptHistory {
         }
     }
 
+    /// The user changed the words: a step ↑ asked for that is still being
+    /// read isn't made, so their words stay. The next ↑ starts again from
+    /// them, as their words are no longer what was shown.
+    func edited() {
+        waiting = nil
+    }
+
     /// ↓: the prompt after the one shown, or the draft after the newest.
     /// False when the box is on the draft already, or its words were
     /// changed, so the key does what it does anyway.

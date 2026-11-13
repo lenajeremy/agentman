@@ -169,10 +169,10 @@ final class PromptHistoryTests: XCTestCase {
                        "a summary with Claude Code's newer note before it")
         XCTAssertTrue(PromptHistory.isPrompt(message(.user, "<div> in the header is off by a pixel")))
         XCTAssertTrue(PromptHistory.isPrompt(message(.user, "why did it say \"" + summary + "\"?")))
-        XCTAssertEqual(AgentsStore.queuedWords(AgentsStore.queuedLabel("look", images: 2)), "look")
-        XCTAssertEqual(AgentsStore.queuedWords(AgentsStore.queuedLabel("look", images: 1)), "look")
-        XCTAssertEqual(AgentsStore.queuedWords(AgentsStore.queuedLabel("look\nagain", images: 0)), "look\nagain")
-        XCTAssertNil(AgentsStore.queuedWords(AgentsStore.queuedLabel("", images: 3)))
+        XCTAssertEqual(QueuedMessage(words: "look", images: 2).label, "2 images · look")
+        XCTAssertEqual(QueuedMessage(words: "look", images: 1).label, "1 image · look")
+        XCTAssertEqual(QueuedMessage(words: "look").label, "look")
+        XCTAssertEqual(QueuedMessage(words: "", images: 3).label, "3 images")
     }
 
     // The box gets the words back, not the pictures that went with them.
@@ -186,6 +186,56 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertEqual(PromptHistory.words("@/Users/me/shop/main.go tidy it"), "@/Users/me/shop/main.go tidy it", "files stay, as chips")
         XCTAssertEqual(PromptHistory.words("compare /tmp/a.png with the design"), "compare /tmp/a.png with the design",
                        "a picture of the user's own, named in the words, is words")
+    }
+
+    // A message queued for a busy agent is in its history by its words,
+    // whatever they are, and leaves the queue when the agent's copy comes,
+    // pictures or not.
+    func testQueuedMessagesKeepTheirWords() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        let picture = InlineImage(mime: "image/png", data: "iVBORw0KGgo=")
+        await store.send("2 images", to: "claude:s1")
+        await store.send("1 image · fix this", images: [picture], to: "claude:s1")
+        await store.send("", images: [picture, picture], to: "claude:s1")
+        XCTAssertEqual(store.queued["claude:s1"]?.map(\.label), ["2 images", "1 image · 1 image · fix this", "2 images"])
+        XCTAssertEqual(store.loadedPrompts("claude:s1").prompts, ["1 image · fix this", "2 images"],
+                       "the words as written, newest first; pictures alone aren't")
+
+        // The agent's copies arrive: the pictures' paths ahead of the words.
+        var arrived = DaemonEvent(type: "messages")
+        arrived.sessionId = "claude:s1"
+        arrived.messages = [
+            Message(id: "a", sessionId: "claude:s1", role: .user, ts: 1, text: "2 images"),
+            Message(id: "b", sessionId: "claude:s1", role: .user, ts: 2, text: "/Users/me/.agentman/images/claude-s1/x.png 1 image · fix this"),
+            Message(id: "c", sessionId: "claude:s1", role: .user, ts: 3, text: "/Users/me/.agentman/images/claude-s1/y.png"),
+        ]
+        store.apply(arrived)
+        XCTAssertEqual(store.queued["claude:s1"] ?? [], [], "each found by its words, not its label")
+    }
+
+    // Typing while ↑ waits on an older page keeps what was typed.
+    func testTypingWhileAPageIsReadKeepsTheWords() async throws {
+        let history = history(["only"], older: ["page 1": .init(prompts: ["older"], cursor: nil, hasMore: false)])
+        let slow = history.fetch
+        history.fetch = { id, cursor in
+            try? await Task.sleep(for: .milliseconds(150))
+            return await slow(id, cursor)
+        }
+        var shown: [String] = []
+        XCTAssertTrue(history.older(than: "draft") { shown.append($0) })
+        history.showing("only")
+        XCTAssertTrue(history.older(than: "only") { shown.append($0) }, "waits on the page")
+        history.edited()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(shown, ["only"], "the page came, and the typed words stayed")
+        XCTAssertEqual(history.prompts, ["only", "older"], "though what it read is kept for the next ↑")
     }
 
     // MARK: - In the box
@@ -287,6 +337,25 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertEqual(text.string, "said before")
         arrow(text, up: false)
         XCTAssertEqual(text.string, "one\ntwo\nthree")
+    }
+
+    // In the box: typing while ↑ waits on a page is the user's, and stays.
+    func testTypingInTheBoxWhileAPageIsReadStays() throws {
+        let draft = Draft()
+        let history = history(["only"], older: ["page 1": .init(prompts: ["older"], cursor: nil, hasMore: false)])
+        let slow = history.fetch
+        history.fetch = { id, cursor in
+            try? await Task.sleep(for: .milliseconds(150))
+            return await slow(id, cursor)
+        }
+        let text = try box(history, draft: draft)
+        arrow(text, up: true)
+        XCTAssertEqual(text.string, "only")
+        arrow(text, up: true)
+        text.insertText(" and more", replacementRange: NSRange(location: (text.string as NSString).length, length: 0))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(text.string, "only and more")
+        XCTAssertEqual(draft.text, "only and more")
     }
 
     // A long line wraps: its first drawn line is the first line.

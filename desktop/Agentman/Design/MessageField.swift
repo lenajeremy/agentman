@@ -454,12 +454,14 @@ final class MessageTextView: NSTextView {
     func show(fromHistory text: String, caretAtStart: Bool) {
         mentions?.dismiss()
         slash?.dismiss()
+        showingFromHistory = true
         let all = NSRange(location: 0, length: (string as NSString).length)
         if shouldChangeText(in: all, replacementString: text) {
             replaceCharacters(in: all, with: text)
             didChangeText()
         }
         makeChips(all: true)
+        showingFromHistory = false
         history?.showing(plainText)
         let end = (string as NSString).length
         setSelectedRange(NSRange(location: caretAtStart ? 0 : end, length: 0))
@@ -570,7 +572,11 @@ final class MessageTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         needsDisplay = true
+        if !showingFromHistory { history?.edited() }
     }
+
+    /// Set while the history puts words in the box, which aren't the user's.
+    private var showingFromHistory = false
 
     // MARK: File chips
 

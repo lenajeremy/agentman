@@ -34,7 +34,7 @@ final class AgentsStore {
     /// Messages the daemon queued for an agent it cannot type into: they
     /// reach it when its current turn ends. Shown until the agent's own copy
     /// of them arrives in its conversation.
-    private(set) var queued: [String: [String]] = [:]
+    private(set) var queued: [String: [QueuedMessage]] = [:]
     var search = ""
     /// What the conversations said that matches `search`, for the sidebar:
     /// the daemon's answer to the text as it was a moment ago.
@@ -484,25 +484,11 @@ final class AgentsStore {
         request.clientId = "mac-send-\(UUID().uuidString)"
         let status = await performWithStatus(request, for: sessionId)
         if status == .queued {
-            queued[sessionId, default: []].append(Self.queuedLabel(text, images: images.count))
+            queued[sessionId, default: []].append(QueuedMessage(words: text, images: images.count))
         }
         return status != .failed
     }
 
-    /// How a message waiting to reach its agent is shown: its words, after
-    /// how many images go with it.
-    nonisolated static func queuedLabel(_ text: String, images: Int) -> String {
-        guard images > 0 else { return text }
-        let note = images == 1 ? "1 image" : "\(images) images"
-        return text.isEmpty ? note : "\(note) · \(text)"
-    }
-
-    /// The words of a waiting message, from how it is shown; nil for images
-    /// alone.
-    nonisolated static func queuedWords(_ label: String) -> String? {
-        guard let match = label.firstMatch(of: /^(?:1 image|\d+ images)(?: · ([\s\S]*))?$/) else { return label }
-        return match.1.map(String.init)
-    }
 
     /// Answers the question an agent is showing, with an option, a note, or both.
     @discardableResult
@@ -1003,7 +989,7 @@ final class AgentsStore {
     /// thread's older pages start: where ↑ in its box begins.
     func loadedPrompts(_ sessionId: String) -> PromptHistory.Prompts {
         let said = (messages[sessionId] ?? []).filter(PromptHistory.isPrompt).compactMap { $0.text.flatMap(PromptHistory.words) }
-        let waiting = (queued[sessionId] ?? []).compactMap(Self.queuedWords).compactMap(PromptHistory.words)
+        let waiting = (queued[sessionId] ?? []).map(\.words).compactMap(PromptHistory.words)
         return PromptHistory.Prompts(prompts: (said + waiting).reversed(), cursor: cursors[sessionId], hasMore: hasMore[sessionId] == true)
     }
 
@@ -1339,9 +1325,14 @@ final class AgentsStore {
         messages[sessionId] = current
         // A queued message that has reached the agent shows as its own.
         if var waiting = queued[sessionId], !waiting.isEmpty {
+            // Found by its words, not by how it is shown: "1 image · …" is
+            // nowhere in the agent's copy. Images alone, by the first.
             for message in added where message.role == .user {
                 let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if let index = waiting.firstIndex(where: { text.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) {
+                if let index = waiting.firstIndex(where: { queued in
+                    let words = queued.words.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return words.isEmpty || text.contains(words)
+                }) {
                     waiting.remove(at: index)
                 }
             }
@@ -1614,3 +1605,16 @@ final class ToolRunTitle {
     var text: String?
 }
 
+/// A message the daemon queued for an agent that couldn't take it yet: what
+/// was written, and how many images went with it.
+struct QueuedMessage: Hashable, Sendable {
+    var words: String
+    var images = 0
+
+    /// As the thread shows it: its words, after how many images go with it.
+    var label: String {
+        guard images > 0 else { return words }
+        let note = images == 1 ? "1 image" : "\(images) images"
+        return words.isEmpty ? note : "\(note) · \(words)"
+    }
+}
