@@ -42,38 +42,58 @@ final class PromptHistoryTests: XCTestCase {
 
     func testUpGoesBackThroughTheThreadThenTheDaemon() async {
         var fetched = 0
-        let history = history(["third", "second", "first"], older: [
+        let thread = (1...8).reversed().map { "prompt \($0)" }
+        let history = history(thread, older: [
             "page 1": .init(prompts: ["older two", "older one"], cursor: "page 2", hasMore: true),
             "page 2": .init(prompts: ["the very first"], cursor: nil, hasMore: false),
         ], fetches: { fetched += 1 })
 
-        let third = await up(history, from: "half a thought")
-        XCTAssertEqual(third, "third")
-        let second = await up(history, from: "third")
-        XCTAssertEqual(second, "second")
-        let first = await up(history, from: "second")
-        XCTAssertEqual(first, "first")
-        XCTAssertEqual(fetched, 0, "the thread's own messages need no daemon")
-        let older = await up(history, from: "first")
-        XCTAssertEqual(older, "older two")
-        XCTAssertEqual(fetched, 1, "past the thread, a page is asked for")
-        let olderStill = await up(history, from: "older two")
-        XCTAssertEqual(olderStill, "older one")
-        XCTAssertEqual(fetched, 1, "that page held it")
-        let veryFirst = await up(history, from: "older one")
-        XCTAssertEqual(veryFirst, "the very first")
+        var text = "half a thought"
+        var seen: [String] = []
+        while let next = await up(history, from: text) {
+            seen.append(next)
+            text = next
+            if seen.count == 2 {
+                XCTAssertEqual(fetched, 0, "the thread's own messages need no daemon, far from their end")
+            }
+        }
+        XCTAssertEqual(seen, thread + ["older two", "older one", "the very first"])
+        XCTAssertEqual(fetched, 2, "a page at a time, each once")
         XCTAssertFalse(history.older(than: "the very first") { _ in XCTFail("nothing further back") })
 
         // ↓ comes forward again, and past the newest gives the draft back.
-        XCTAssertEqual(down(history, from: "the very first"), "older one")
-        XCTAssertEqual(down(history, from: "older one"), "older two")
-        XCTAssertEqual(down(history, from: "older two"), "first")
-        XCTAssertEqual(down(history, from: "first"), "second")
-        XCTAssertEqual(down(history, from: "second"), "third")
-        XCTAssertEqual(down(history, from: "third"), "half a thought")
+        var back: [String] = []
+        while let next = down(history, from: text) {
+            back.append(next)
+            text = next
+        }
+        XCTAssertEqual(back, Array(seen.reversed().dropFirst()) + ["half a thought"])
         XCTAssertFalse(history.isBrowsing)
         XCTAssertTrue(history.prompts.isEmpty, "back on the draft, nothing is held")
         XCTAssertNil(down(history, from: "half a thought"), "↓ on the draft is the caret's")
+    }
+
+    // Near the end of what it holds, the next page is read before ↑ gets
+    // there, so ↑ doesn't wait on it.
+    func testTheNextPageIsReadBeforeItIsWanted() async throws {
+        var fetched = 0
+        let history = history(["three", "two", "one"], older: [
+            "page 1": .init(prompts: ["older"], cursor: nil, hasMore: false),
+        ], fetches: { fetched += 1 })
+        var shown: String?
+        XCTAssertTrue(history.older(than: "") { shown = $0 })
+        XCTAssertEqual(shown, "three")
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(fetched, 1, "read ahead")
+        XCTAssertEqual(history.prompts, ["three", "two", "one", "older"])
+        history.showing("three")
+        for want in ["two", "one", "older"] {
+            var now: String?
+            XCTAssertTrue(history.older(than: shown ?? "") { now = $0 })
+            XCTAssertEqual(now, want, "shown at once")
+            shown = now
+            history.showing(want)
+        }
     }
 
     // Changing a prompt from the history makes it the message being

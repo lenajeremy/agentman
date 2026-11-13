@@ -71,46 +71,73 @@ final class PromptHistory {
         if next < prompts.count {
             position = next
             show(prompts[next])
+            readAheadIfNear()
             return true
         }
         guard hasMore, cursor != nil else {
             if position == nil { reset() }
             return false
         }
-        // Asked already: the answer moves the box when it comes.
-        guard fetching == nil else { return true }
-        let from = position
+        // The page being read moves the box when it comes.
+        waiting = (next, show)
+        readAhead()
+        return true
+    }
+
+    /// How close to the last prompt held ↑ comes before the next page is
+    /// read, so that reading it, a fraction of a second in a long
+    /// conversation, is done before it is wanted.
+    static let readAheadWithin = 5
+
+    /// A step ↑ asked for past the prompts held, made once they are read.
+    private var waiting: (step: Int, show: (String) -> Void)?
+
+    private func readAheadIfNear() {
+        if prompts.count - (position ?? -1) - 1 <= Self.readAheadWithin { readAhead() }
+    }
+
+    /// Reads the next page of older prompts, unless one is being read or
+    /// none is left: for a long stretch with none, up to fetchesPerStep
+    /// pages in a row.
+    private func readAhead() {
+        guard fetching == nil, hasMore, cursor != nil, let sessionId else { return }
+        let had = prompts.count
         fetching = Task { [weak self] in
             var tries = 0
-            while let self, self.sessionId == sessionId, self.position == from, next >= self.prompts.count,
+            while let self, self.sessionId == sessionId, self.prompts.count == had,
                   self.hasMore, let cursor = self.cursor, tries < Self.fetchesPerStep, !Task.isCancelled {
                 tries += 1
                 guard let more = await self.fetch(sessionId, cursor), !Task.isCancelled else {
                     self.hasMore = false
                     break
                 }
-                guard self.sessionId == sessionId, self.position == from else { break }
+                guard self.sessionId == sessionId else { return }
                 self.add(more.prompts)
                 self.cursor = more.cursor
                 self.hasMore = more.hasMore
             }
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, self.sessionId == sessionId else { return }
             fetching = nil
-            guard self.sessionId == sessionId, position == from else { return }
-            if next < prompts.count {
-                position = next
-                show(prompts[next])
-            } else if position == nil {
-                reset()
+            guard let waiting else { return }
+            if waiting.step < prompts.count {
+                self.waiting = nil
+                position = waiting.step
+                waiting.show(prompts[waiting.step])
+                readAheadIfNear()
+            } else if hasMore, prompts.count > had {
+                readAhead()
+            } else {
+                self.waiting = nil
+                if position == nil { reset() }
             }
         }
-        return true
     }
 
     /// ↓: the prompt after the one shown, or the draft after the newest.
     /// False when the box is on the draft already, or its words were
     /// changed, so the key does what it does anyway.
     func newer(than text: String, show: (String) -> Void) -> Bool {
+        waiting = nil
         guard let position else { return false }
         guard text == shown else {
             reset()
@@ -131,6 +158,7 @@ final class PromptHistory {
     func reset() {
         fetching?.cancel()
         fetching = nil
+        waiting = nil
         prompts = []
         position = nil
         draft = ""
