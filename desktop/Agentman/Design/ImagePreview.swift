@@ -258,7 +258,7 @@ struct ImageThumbnail: View {
     }
 
     /// The image file a path names, if it is one.
-    static func imagePath(in text: String) -> String? {
+    nonisolated static func imagePath(in text: String) -> String? {
         guard let match = text.firstMatch(of: imagePattern) else { return nil }
         return String(text[match.range])
     }
@@ -272,7 +272,7 @@ struct ImageThumbnail: View {
     /// that is a path but not such a one is no picture, since the daemon
     /// would refuse it. One that isn't a path at all is searched as before,
     /// with no spaces guessed at.
-    static func imageFile(inSummary summary: String) -> String? {
+    nonisolated static func imageFile(inSummary summary: String) -> String? {
         let first = (summary.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? "")
             .trimmingCharacters(in: .whitespaces)
         guard first.hasPrefix("/") else { return imagePath(in: summary) }
@@ -287,7 +287,7 @@ struct ImageThumbnail: View {
     }
 
     nonisolated(unsafe) private static let imageEnding = try! Regex(#".+\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#)
-    private static let shellCharacters = CharacterSet(charactersIn: "\t\"'`$&|;<>()*?[]\\")
+    nonisolated private static let shellCharacters = CharacterSet(charactersIn: "\t\"'`$&|;<>()*?[]\\")
 
     /// Made once: making it took longer than most searches with it.
     nonisolated(unsafe) private static let imagePattern = try! Regex(#"/[^\s"'`]+?\.(?i:png|jpe?g|gif|webp|heic|bmp|tiff?)"#)
