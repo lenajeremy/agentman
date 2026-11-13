@@ -1228,6 +1228,12 @@ export class EditorStore {
         await this.relist(paths.dir(path));
         landed = destination;
       } else {
+        // A folder pasted into itself would copy its own copy as it went;
+        // am serve refuses it too.
+        if (folder === path || folder.startsWith(path + "/")) {
+          finish();
+          return `${name} can't be copied inside itself.`;
+        }
         const destination = await this.freeName(name, folder);
         try {
           await files.copy(source, this.url(destination));
