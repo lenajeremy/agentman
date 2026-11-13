@@ -200,6 +200,11 @@ final class PromptHistoryTests: XCTestCase {
             return reply
         }
         let store = AgentsStore(client: client)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        var thread = DaemonEvent(type: "messages")
+        thread.sessionId = "claude:s1"
+        thread.messages = [Message(id: "t1", sessionId: "claude:s1", role: .assistant, ts: now - 60_000, text: "Working on it.")]
+        store.apply(thread)
         let picture = InlineImage(mime: "image/png", data: "iVBORw0KGgo=")
         await store.send("2 images", to: "claude:s1")
         await store.send("1 image · fix this", images: [picture], to: "claude:s1")
@@ -208,16 +213,125 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertEqual(store.loadedPrompts("claude:s1").prompts, ["1 image · fix this", "2 images"],
                        "the words as written, newest first; pictures alone aren't")
 
+        // Scrolling up brings older messages through the same way: none of
+        // them is a copy, though one has the same words and one a picture.
+        var older = DaemonEvent(type: "messages")
+        older.sessionId = "claude:s1"
+        older.messages = [
+            Message(id: "o1", sessionId: "claude:s1", role: .user, ts: now - 600_000, text: "an older message"),
+            Message(id: "o2", sessionId: "claude:s1", role: .user, ts: now - 500_000, text: "2 images"),
+            Message(id: "o3", sessionId: "claude:s1", role: .user, ts: now - 400_000, text: "/Users/me/.agentman/images/claude-s1/old.png"),
+        ]
+        store.apply(older)
+        XCTAssertEqual(store.queued["claude:s1"]?.count, 3, "older messages aren't the queued ones")
+
         // The agent's copies arrive: the pictures' paths ahead of the words.
         var arrived = DaemonEvent(type: "messages")
         arrived.sessionId = "claude:s1"
         arrived.messages = [
-            Message(id: "a", sessionId: "claude:s1", role: .user, ts: 1, text: "2 images"),
-            Message(id: "b", sessionId: "claude:s1", role: .user, ts: 2, text: "/Users/me/.agentman/images/claude-s1/x.png 1 image · fix this"),
-            Message(id: "c", sessionId: "claude:s1", role: .user, ts: 3, text: "/Users/me/.agentman/images/claude-s1/y.png"),
+            Message(id: "a", sessionId: "claude:s1", role: .user, ts: now + 1_000, text: "2 images"),
+            Message(id: "b", sessionId: "claude:s1", role: .user, ts: now + 2_000, text: "/Users/me/.agentman/images/claude-s1/x.png 1 image · fix this"),
+            Message(id: "c", sessionId: "claude:s1", role: .user, ts: now + 3_000, text: "a later message, no picture"),
         ]
         store.apply(arrived)
-        XCTAssertEqual(store.queued["claude:s1"] ?? [], [], "each found by its words, not its label")
+        XCTAssertEqual(store.queued["claude:s1"]?.map(\.label), ["2 images"], "found by their words; pictures alone wait for a message with pictures")
+        var pictures = DaemonEvent(type: "messages")
+        pictures.sessionId = "claude:s1"
+        pictures.messages = [Message(id: "d", sessionId: "claude:s1", role: .user, ts: now + 4_000, text: "", images: ["/Users/me/.agentman/images/claude-s1/y.png"])]
+        store.apply(pictures)
+        XCTAssertEqual(store.queued["claude:s1"] ?? [], [])
+    }
+
+    // Sent before the thread loaded: its first page is from before, even a
+    // message there with the same words; the copy comes after it.
+    func testSentBeforeTheThreadLoadedWaitsForTheCopy() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        await store.send("run the tests again", to: "codex:x1")
+        var firstPage = DaemonEvent(type: "messages")
+        firstPage.sessionId = "codex:x1"
+        firstPage.messages = [Message(id: "p1", sessionId: "codex:x1", role: .user, ts: 100, text: "run the tests again"),
+                              Message(id: "p2", sessionId: "codex:x1", role: .assistant, ts: 200, text: "All pass.")]
+        store.apply(firstPage)
+        XCTAssertEqual(store.queued["codex:x1"]?.count, 1, "the same words, from before")
+        var copy = DaemonEvent(type: "messages")
+        copy.sessionId = "codex:x1"
+        copy.messages = [Message(id: "p3", sessionId: "codex:x1", role: .user, ts: 300, text: "run the tests again")]
+        store.apply(copy)
+        XCTAssertEqual(store.queued["codex:x1"] ?? [], [])
+    }
+
+    // Sent before the thread loaded, and read by the agent before it did:
+    // the copy on the first page is found by the clock, not an older
+    // message with the same words.
+    func testACopyAlreadyOnTheFirstPageIsFound() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        await store.send("run the tests again", to: "codex:x2")
+        let sent = store.queued["codex:x2"]?.first?.sent ?? 0
+        var firstPage = DaemonEvent(type: "messages")
+        firstPage.sessionId = "codex:x2"
+        firstPage.messages = [Message(id: "q1", sessionId: "codex:x2", role: .user, ts: sent - 90_000, text: "run the tests again"),
+                              Message(id: "q2", sessionId: "codex:x2", role: .assistant, ts: sent - 60_000, text: "All pass."),
+                              Message(id: "q3", sessionId: "codex:x2", role: .user, ts: sent + 5_000, text: "run the tests again")]
+        store.apply(firstPage)
+        XCTAssertEqual(store.queued["codex:x2"] ?? [], [])
+
+        // And with only the copy on it.
+        await store.send("one more thing", to: "codex:x3")
+        let later = store.queued["codex:x3"]?.first?.sent ?? 0
+        var only = DaemonEvent(type: "messages")
+        only.sessionId = "codex:x3"
+        only.messages = [Message(id: "z1", sessionId: "codex:x3", role: .user, ts: later + 1_000, text: "one more thing")]
+        store.apply(only)
+        XCTAssertEqual(store.queued["codex:x3"] ?? [], [])
+    }
+
+    // Cursor's ts is the chat's start and a row number, not the time: in a
+    // chat days old a new copy is still found, by its place after the last
+    // message, and a picture by Cursor's "[image]".
+    func testACursorCopyIsFoundByItsPlace() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        let started: Int64 = 1_700_000_000_000 // a chat started long ago
+        var thread = DaemonEvent(type: "messages")
+        thread.sessionId = "cursor:c1"
+        thread.messages = [Message(id: "r10", sessionId: "cursor:c1", role: .assistant, ts: started + 10, text: "Done.")]
+        store.apply(thread)
+        await store.send("tidy the tests", to: "cursor:c1")
+        await store.send("", images: [InlineImage(mime: "image/png", data: "iVBORw0KGgo=")], to: "cursor:c1")
+
+        var older = DaemonEvent(type: "messages")
+        older.sessionId = "cursor:c1"
+        older.messages = [Message(id: "r3", sessionId: "cursor:c1", role: .user, ts: started + 3, text: "tidy the tests"),
+                          Message(id: "r4", sessionId: "cursor:c1", role: .user, ts: started + 4, text: "[image]")]
+        store.apply(older)
+        XCTAssertEqual(store.queued["cursor:c1"]?.count, 2, "earlier rows aren't the copies")
+
+        var copies = DaemonEvent(type: "messages")
+        copies.sessionId = "cursor:c1"
+        copies.messages = [Message(id: "r11", sessionId: "cursor:c1", role: .user, ts: started + 11, text: "tidy the tests"),
+                           Message(id: "r12", sessionId: "cursor:c1", role: .user, ts: started + 12, text: "[image]")]
+        store.apply(copies)
+        XCTAssertEqual(store.queued["cursor:c1"] ?? [], [])
     }
 
     // Typing while ↑ waits on an older page keeps what was typed.

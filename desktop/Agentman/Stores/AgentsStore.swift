@@ -484,7 +484,7 @@ final class AgentsStore {
         request.clientId = "mac-send-\(UUID().uuidString)"
         let status = await performWithStatus(request, for: sessionId)
         if status == .queued {
-            queued[sessionId, default: []].append(QueuedMessage(words: text, images: images.count))
+            queued[sessionId, default: []].append(QueuedMessage(words: text, images: images.count, after: messages[sessionId]?.last?.id))
         }
         return status != .failed
     }
@@ -1321,17 +1321,33 @@ final class AgentsStore {
 
     /// Adds messages to an agent's conversation, once each, in time order.
     private func merge(_ new: [Message], into sessionId: String) {
+        let hadNone = (messages[sessionId] ?? []).isEmpty
         let (current, added) = Self.merged(messages[sessionId] ?? [], with: new)
         messages[sessionId] = current
         // A queued message that has reached the agent shows as its own.
         if var waiting = queued[sessionId], !waiting.isEmpty {
-            // Found by its words, not by how it is shown: "1 image · …" is
-            // nowhere in the agent's copy. Images alone, by the first.
-            for message in added where message.role == .user {
-                let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            // Only a message placed after the last one the thread had when it
+            // was sent: older pages come through here too, scrolling up, and
+            // land before it. By place, not time: Cursor's ts is the chat's
+            // start and a row number.
+            let place = Dictionary(current.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // Sent before the thread had loaded: the copy comes after the
+            // newest message from before it was sent, by the clock, which
+            // the first page may already hold. (Where ts isn't the clock, as
+            // in Cursor's, that is the first page's newest.)
+            if hadNone, !current.isEmpty {
+                for i in waiting.indices where waiting[i].after == nil {
+                    waiting[i].after = current.last(where: { $0.ts < waiting[i].sent - 2_000 })?.id ?? QueuedMessage.beforeAll
+                }
+            }
+            func boundary(_ queued: QueuedMessage) -> Int? {
+                guard let after = queued.after else { return nil }
+                return after == QueuedMessage.beforeAll ? -1 : place[after]
+            }
+            for message in added {
+                guard let at = place[message.id] else { continue }
                 if let index = waiting.firstIndex(where: { queued in
-                    let words = queued.words.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return words.isEmpty || text.contains(words)
+                    queued.isCopy(message) && (boundary(queued).map { at > $0 } ?? false)
                 }) {
                     waiting.remove(at: index)
                 }
@@ -1610,6 +1626,29 @@ final class ToolRunTitle {
 struct QueuedMessage: Hashable, Sendable {
     var words: String
     var images = 0
+    /// The last message the thread had when it was sent: its copy comes
+    /// after. Nil until the thread has loaded, when nothing counts as one.
+    var after: String?
+    /// When it was sent, in the milliseconds of a message's ts: where the
+    /// boundary goes when it was sent before the thread had loaded.
+    var sent = Int64(Date().timeIntervalSince1970 * 1000)
+    /// A boundary before every message: all of them came after it.
+    static let beforeAll = "\u{0}before"
+
+    /// Whether a message could be the agent's copy of this one: the user's,
+    /// with its words; found by its words, not by how it is shown, as
+    /// "1 image · …" is nowhere in the copy. Images alone, by a message with
+    /// images: attached, typed in as the daemon's paths, or "[image]", as
+    /// Cursor records one.
+    func isCopy(_ message: Message) -> Bool {
+        guard message.role == .user, message.isSidechain != true else { return false }
+        let text = (message.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        if words.isEmpty {
+            return !(message.images ?? []).isEmpty || text.contains("/.agentman/images/") || text.contains("[image]")
+        }
+        return text.contains(words)
+    }
 
     /// As the thread shows it: its words, after how many images go with it.
     var label: String {
