@@ -28,14 +28,12 @@ enum EditorOpener {
     @MainActor
     @discardableResult
     static func open(link url: URL, with openWindow: OpenWindowAction) -> Bool {
-        guard url.scheme == "agentman", let host = url.host(), links.contains("agentman://" + host) else { return false }
-        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
-        guard let folder = value("folder") else { return true }
-        if host == "terminal" {
+        guard let link = EditorLink(url) else { return false }
+        guard let folder = link.folder else { return true }
+        if link.terminal {
             openTerminal(folder: folder, with: openWindow)
         } else {
-            open(folder: folder, file: value("file"), showingAgent: value("agent") == "here", with: openWindow)
+            open(folder: folder, file: link.file, showingAgent: link.showingAgent, with: openWindow)
         }
         return true
     }
@@ -57,6 +55,33 @@ enum EditorOpener {
         panel.message = "Choose a folder to open in the editor"
         panel.prompt = "Open"
         return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+}
+
+/// What one of the editor's links asks for (EditorOpener.links): a folder,
+/// a file in it, the agent working there, or the folder's terminal.
+struct EditorLink: Equatable {
+    var folder: String?
+    var file: String?
+    var showingAgent = false
+    var terminal = false
+
+    /// Nil for a link that isn't the editor's.
+    init?(_ url: URL) {
+        guard url.scheme == "agentman", let host = url.host(), EditorOpener.links.contains("agentman://" + host) else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+        folder = value("folder")
+        file = value("file").flatMap { $0.isEmpty ? nil : $0 }
+        showingAgent = value("agent") == "here"
+        terminal = host == "terminal"
+    }
+
+    init(folder: String?, file: String? = nil, showingAgent: Bool = false, terminal: Bool = false) {
+        self.folder = folder
+        self.file = file
+        self.showingAgent = showingAgent
+        self.terminal = terminal
     }
 }
 

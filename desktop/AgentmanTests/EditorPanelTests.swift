@@ -121,6 +121,27 @@ final class EditorPanelTests: XCTestCase {
         XCTAssertTrue(agents.sessionsLoaded)
     }
 
+    // The links an editor window takes itself, so `am .` with the main
+    // window closed doesn't bring it back; every other link is the main
+    // window's.
+    func testTheEditorsLinksAreKnownFromTheRest() throws {
+        func link(_ text: String) throws -> EditorLink? { EditorLink(try XCTUnwrap(URL(string: text))) }
+        XCTAssertEqual(try link("agentman://edit?agent=here&folder=%2Fwork%2Fshop%20two"),
+                       EditorLink(folder: "/work/shop two", showingAgent: true))
+        XCTAssertEqual(try link("agentman://edit?folder=%2Fwork&file=main.go"), EditorLink(folder: "/work", file: "main.go"))
+        XCTAssertEqual(try link("agentman://edit?folder=%2Fwork&file="), EditorLink(folder: "/work"), "an empty file is none")
+        XCTAssertEqual(try link("agentman://terminal?folder=%2Fwork"), EditorLink(folder: "/work", terminal: true))
+        XCTAssertEqual(try link("agentman://edit"), EditorLink(folder: nil), "the editor's, though it names no folder")
+        XCTAssertNil(try link("agentman://agent/abc"))
+        XCTAssertNil(try link("agentman://settings/keys"))
+        XCTAssertNil(try link("agentman://editor?folder=%2Fwork"), "a host that only begins like edit")
+        XCTAssertNil(try link("https://edit?folder=%2Fwork"))
+        // What the window says it takes is what the link reads as the editor's.
+        for prefix in EditorOpener.links {
+            XCTAssertNotNil(try link(prefix + "?folder=%2Fwork"), prefix)
+        }
+    }
+
     // MARK: - @ mentions
 
     private func mentions(_ root: URL, _ files: [String], front: String? = nil) -> FileMentions {
