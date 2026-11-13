@@ -1202,6 +1202,16 @@ func (d *Daemon) HandleFrom(
 		event := protocol.Event{Type: protocol.EvtPage, Page: &page}
 		return fitMessageEvent(event)
 
+	case protocol.ReqFetchPrompts:
+		page, err := d.prompts(ctx, req.SessionID, req.Before, req.Limit)
+		if err != nil && d.reopenFromSearch(ctx, req.SessionID) {
+			page, err = d.prompts(ctx, req.SessionID, req.Before, req.Limit)
+		}
+		if err != nil {
+			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
+		}
+		return fitMessageEvent(protocol.Event{Type: protocol.EvtPage, Page: &page})
+
 	case protocol.ReqSubscribe:
 		if err := d.startFollow(subscriberID, req.SessionID); err != nil {
 			return protocol.Event{Type: protocol.EvtError, SessionID: req.SessionID, Error: err.Error()}
@@ -1479,7 +1489,7 @@ const wireTruncation = "\n\n[output truncated by agentman]"
 
 func validateRequest(req protocol.Request) error {
 	requiresSession := req.Type == protocol.ReqSubscribe || req.Type == protocol.ReqUnsubscribe ||
-		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqSendMessage ||
+		req.Type == protocol.ReqFetchMessages || req.Type == protocol.ReqFetchPrompts || req.Type == protocol.ReqSendMessage ||
 		req.Type == protocol.ReqInterrupt || req.Type == protocol.ReqAnswer || req.Type == protocol.ReqMoveQuestion || req.Type == protocol.ReqCloseQuestion ||
 		req.Type == protocol.ReqSendQueued ||
 		req.Type == protocol.ReqOpenServer || req.Type == protocol.ReqCloseServer ||
@@ -1512,7 +1522,7 @@ func validateRequest(req protocol.Request) error {
 	}
 	switch req.Type {
 	case protocol.ReqListSessions, protocol.ReqSubscribe, protocol.ReqUnsubscribe,
-		protocol.ReqFetchMessages, protocol.ReqInterrupt, protocol.ReqSendQueued,
+		protocol.ReqFetchMessages, protocol.ReqFetchPrompts, protocol.ReqInterrupt, protocol.ReqSendQueued,
 		protocol.ReqRegisterPush:
 		return nil
 	case protocol.ReqListDirectories:

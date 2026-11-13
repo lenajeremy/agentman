@@ -31,6 +31,7 @@ enum RequestType: String, Codable, Sendable {
     case subscribe
     case unsubscribe
     case fetchMessages = "fetch_messages"
+    case fetchPrompts = "fetch_prompts"
     case sendMessage = "send_message"
     case interrupt
     case sendQueued = "send_queued"

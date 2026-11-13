@@ -33,7 +33,7 @@ func runOpen(args []string) error {
 		return err
 	}
 	if fs.NArg() > 1 {
-		return errors.New("usage: am open [folder or file]")
+		return errors.New("one folder or file at a time: am open [folder or file], or am <folder or file>")
 	}
 	target := "."
 	if fs.NArg() == 1 {
@@ -51,6 +51,22 @@ func runOpen(args []string) error {
 	}
 	fmt.Printf("Opened %s in Agentman\n", tildePath(folder))
 	return nil
+}
+
+// namesAFolderOrFile reports whether what was typed in a command's place
+// is a folder or file to open, as in `am .`: a path, or the name of one
+// here. A command of the same name comes first; `am ./serve` opens a folder
+// called serve. A path that isn't there still counts, so it is answered as a
+// missing folder rather than an unknown command.
+func namesAFolderOrFile(arg string) bool {
+	if arg == "" || strings.HasPrefix(arg, "-") {
+		return false
+	}
+	if arg == "." || arg == ".." || strings.ContainsRune(arg, filepath.Separator) {
+		return true
+	}
+	_, err := os.Stat(arg)
+	return err == nil
 }
 
 // editorLink is the link that opens target in the editor: its folder, with

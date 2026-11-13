@@ -33,6 +33,8 @@ struct MessageField: NSViewRepresentable {
     var mentions: FileMentions?
     /// The agent's commands, for `/` at the start, where it takes them.
     var slash: SlashCommands?
+    /// What was said to the agent before, for ↑ and ↓.
+    var history: PromptHistory?
 
     static let lineSpacing: CGFloat = 3
 
@@ -111,6 +113,7 @@ struct MessageField: NSViewRepresentable {
         mentions?.textView = textView
         textView.slash = slash
         slash?.textView = textView
+        textView.history = history
     }
 
     /// As tall as its lines, from one to `maxLines`. Measured on the text
@@ -173,7 +176,7 @@ struct MessageField: NSViewRepresentable {
         private func followSlash() {
             guard let textView, let slash = parent.slash else { return }
             let selection = textView.selectedRange()
-            if selection.length == 0, !textView.hasMarkedText() {
+            if selection.length == 0, !textView.hasMarkedText(), !textView.showsHistory {
                 slash.update(text: textView.string, caret: selection.location)
             } else {
                 slash.dismiss()
@@ -184,7 +187,7 @@ struct MessageField: NSViewRepresentable {
         private func followMention() {
             guard let textView, let mentions = parent.mentions else { return }
             let selection = textView.selectedRange()
-            if selection.length == 0, !textView.hasMarkedText() {
+            if selection.length == 0, !textView.hasMarkedText(), !textView.showsHistory {
                 mentions.update(text: textView.string, caret: selection.location)
             } else {
                 mentions.dismiss()
@@ -298,6 +301,7 @@ final class MessageTextView: NSTextView {
     var focusChanged: (Bool) -> Void = { _ in }
     var mentions: FileMentions?
     var slash: SlashCommands?
+    var history: PromptHistory?
     /// Focus asked for before the box was in a window, given when it is.
     private var wantsFocus = false
     var autofocus = false
@@ -357,6 +361,7 @@ final class MessageTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         hover.close()
+        if stepsThroughHistory(event) { return }
         // The commands for `/`, as the files for `@`.
         if let slash, slash.isOpen, !slash.results.isEmpty, !hasMarkedText() {
             switch event.keyCode {
@@ -395,6 +400,74 @@ final class MessageTextView: NSTextView {
         } else {
             super.keyDown(with: event)
         }
+    }
+
+    // MARK: History
+
+    /// Whether the box holds a prompt from the history, as it was given: a
+    /// `/` or `@` in it opens no menu over the next ↑.
+    var showsHistory: Bool { history?.shows(plainText) ?? false }
+
+    /// ↑ on the first line goes back through what was said to the agent,
+    /// ↓ on the last line forward again, as in a terminal; on any other
+    /// line they move the caret, and a menu for `/` or `@` takes them first.
+    private func stepsThroughHistory(_ event: NSEvent) -> Bool {
+        guard let history, isEditable, !hasMarkedText(), event.keyCode == 126 || event.keyCode == 125,
+              event.modifierFlags.isDisjoint(with: [.shift, .command, .option, .control]) else { return false }
+        if !showsHistory, slash?.isOpen == true || mentions?.isOpen == true { return false }
+        if event.keyCode == 126 {
+            return caretLine(.first) && history.older(than: plainText) { [weak self] in self?.show(fromHistory: $0, caretAtStart: true) }
+        }
+        return caretLine(.last) && history.newer(than: plainText) { [weak self] in self?.show(fromHistory: $0, caretAtStart: false) }
+    }
+
+    enum Line { case first, last }
+
+    /// Whether the caret, with nothing selected, is on the box's first or
+    /// last line as drawn: a long line wraps onto several.
+    func caretLine(_ line: Line) -> Bool {
+        let caret = selectedRange()
+        guard caret.length == 0 else { return false }
+        let length = (string as NSString).length
+        guard length > 0, let layoutManager, let textContainer else { return true }
+        layoutManager.ensureLayout(for: textContainer)
+        let here = lineRect(at: caret.location, layoutManager)
+        let edge = lineRect(at: line == .first ? 0 : length, layoutManager)
+        return line == .first ? here.minY <= edge.minY + 0.5 : here.minY >= edge.minY - 0.5
+    }
+
+    /// The line a caret at location is on; at the very end after a line
+    /// break, the empty line the text view draws there.
+    private func lineRect(at location: Int, _ layoutManager: NSLayoutManager) -> NSRect {
+        let length = (string as NSString).length
+        if location >= length {
+            let extra = layoutManager.extraLineFragmentRect
+            if !extra.isEmpty { return extra }
+            return layoutManager.lineFragmentRect(forGlyphAt: layoutManager.glyphIndexForCharacter(at: length - 1), effectiveRange: nil)
+        }
+        return layoutManager.lineFragmentRect(forGlyphAt: layoutManager.glyphIndexForCharacter(at: location), effectiveRange: nil)
+    }
+
+    /// Puts a prompt from the history, or the draft back, in the box, as one
+    /// change undo takes back. Going back, the caret is at its start, so the
+    /// next ↑ goes on back; coming forward, at its end.
+    func show(fromHistory text: String, caretAtStart: Bool) {
+        mentions?.dismiss()
+        slash?.dismiss()
+        showingFromHistory = true
+        let all = NSRange(location: 0, length: (string as NSString).length)
+        if shouldChangeText(in: all, replacementString: text) {
+            replaceCharacters(in: all, with: text)
+            didChangeText()
+        }
+        makeChips(all: true)
+        showingFromHistory = false
+        history?.showing(plainText)
+        let end = (string as NSString).length
+        setSelectedRange(NSRange(location: caretAtStart ? 0 : end, length: 0))
+        scrollRangeToVisible(selectedRange())
+        mentions?.dismiss()
+        slash?.dismiss()
     }
 
     // MARK: Paste
@@ -499,7 +572,11 @@ final class MessageTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         needsDisplay = true
+        if !showingFromHistory { history?.edited() }
     }
+
+    /// Set while the history puts words in the box, which aren't the user's.
+    private var showingFromHistory = false
 
     // MARK: File chips
 

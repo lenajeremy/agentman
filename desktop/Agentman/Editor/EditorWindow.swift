@@ -18,6 +18,34 @@ enum EditorOpener {
         openWindow(id: "editor", value: store.root.path)
     }
 
+    /// The links an editor opens, as their starts: a folder (`am open`,
+    /// `am .`) and a folder's terminal.
+    static let links: Set<String> = ["agentman://edit", "agentman://terminal"]
+    /// What an editor window takes itself: those links, and files from
+    /// Finder.
+    static let opens = links.union(["file://"])
+
+    /// Opens a file from Finder (FileOpener.swift), or what an editor link
+    /// asks for:
+    /// agentman://edit?folder=…&file=…&agent=here, as `am open` sends, or
+    /// agentman://terminal?folder=…. False for any other link.
+    @MainActor
+    @discardableResult
+    static func open(link url: URL, with openWindow: OpenWindowAction) -> Bool {
+        if url.isFileURL {
+            open(file: url, with: openWindow)
+            return true
+        }
+        guard let link = EditorLink(url) else { return false }
+        guard let folder = link.folder else { return true }
+        if link.terminal {
+            openTerminal(folder: folder, with: openWindow)
+        } else {
+            open(folder: folder, file: link.file, showingAgent: link.showingAgent, with: openWindow)
+        }
+        return true
+    }
+
     /// Opens the folder's editor with its terminal showing.
     @MainActor
     static func openTerminal(folder: String, with openWindow: OpenWindowAction) {
@@ -38,6 +66,33 @@ enum EditorOpener {
     }
 }
 
+/// What one of the editor's links asks for (EditorOpener.links): a folder,
+/// a file in it, the agent working there, or the folder's terminal.
+struct EditorLink: Equatable {
+    var folder: String?
+    var file: String?
+    var showingAgent = false
+    var terminal = false
+
+    /// Nil for a link that isn't the editor's.
+    init?(_ url: URL) {
+        guard url.scheme == "agentman", let host = url.host(), EditorOpener.links.contains("agentman://" + host) else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+        folder = value("folder")
+        file = value("file").flatMap { $0.isEmpty ? nil : $0 }
+        showingAgent = value("agent") == "here"
+        terminal = host == "terminal"
+    }
+
+    init(folder: String?, file: String? = nil, showingAgent: Bool = false, terminal: Bool = false) {
+        self.folder = folder
+        self.file = file
+        self.showingAgent = showingAgent
+        self.terminal = terminal
+    }
+}
+
 /// A small editor for one folder: its files in a tree with what git says
 /// changed, the files open in tabs, and a status bar, in the manner of VS
 /// Code, Zed and the code views in v0 and AI Studio.
@@ -45,6 +100,7 @@ struct EditorWindow: View {
     @State private var headerLeading: CGFloat = 82
     @Environment(AgentsStore.self) private var agents
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     @State private var store: EditorStore
     @State private var naming: Naming?
     @State private var keyMonitor: Any?
@@ -200,6 +256,12 @@ struct EditorWindow: View {
             }
         }
         .onAppear(perform: installKeys)
+        // A folder opened (`am .`) or a file from Finder while an editor is
+        // open: the editor takes it, so a main window that was closed stays
+        // closed. With no editor open, the main window takes it, as it takes
+        // every other link.
+        .onOpenURL { EditorOpener.open(link: $0, with: openWindow) }
+        .handlesExternalEvents(preferring: EditorOpener.opens, allowing: EditorOpener.opens)
         .onChange(of: FolderAgentWait(asked: store.showsFolderAgent, loaded: agents.sessionsLoaded, sessions: agents.sessions.map(\.id)),
                   initial: true) {
             store.showFolderAgent(in: agents.sessions, loaded: agents.sessionsLoaded)
