@@ -8,7 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/hashicorp/yamux v0.1.2
 	github.com/mdp/qrterminal/v3 v3.2.1
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.61.1
 	rsc.io/qr v0.2.0
 )
