@@ -96,6 +96,23 @@ instead), SF Symbols (Lucide, with the Mac's shapes drawn where Lucide
 has none), and the Mac's ideal tree width, which its test runs show at
 the most (420).
 
+From feat/am-open-folder on 2026-11-13 (Mac 0.46.0, not yet on main;
+merged in 4d781c0):
+16. ✓ (0db5ce2) The sidebar's footer: Usage, then a gear for Settings,
+    where the appearance switch was.
+17. ✓ (cd8cc56) A compacted conversation's summary folds when newer
+    Claude Code puts a note before it.
+18. ✓ (9595da9) A queued message keeps its words and how many images went
+    with it, and leaves the queue when the agent's copy comes, pictures
+    and all.
+19. ✓ (db76898) ↑ and ↓ in an agent's message box go back through what
+    was said to it, past the page loaded through fetch_prompts.
+Not for the web app: text files from Finder opening in the editor, and
+Agentman as what opens them (Settings › General on the Mac); `am .` is am's
+own and works as it is. Also, in a browser only: Settings opens over the
+page (8c2e76e), and the search field shows ⌘K (57eb52b), as a browser has
+no menu bar.
+
 Gone back over 1–9 on 2026-11-10, past the main path of each (the keyboard
 after each overlay, no data, no main window, every way in, dark mode):
 1. 9ce2375 Muse and Cursor CLI named as on the Mac, Muse's logo; 7064563
