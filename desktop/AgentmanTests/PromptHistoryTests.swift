@@ -242,6 +242,31 @@ final class PromptHistoryTests: XCTestCase {
         XCTAssertEqual(store.queued["claude:s1"] ?? [], [])
     }
 
+    // Sent before the thread loaded: its first page is from before, even a
+    // message there with the same words; the copy comes after it.
+    func testSentBeforeTheThreadLoadedWaitsForTheCopy() async throws {
+        let client = DaemonClient(socketPath: "/nonexistent/agentman-history.sock")
+        client.answer = { request in
+            guard request.type == .sendMessage else { return nil }
+            var reply = DaemonEvent(type: "send_result")
+            reply.status = .queued
+            return reply
+        }
+        let store = AgentsStore(client: client)
+        await store.send("run the tests again", to: "codex:x1")
+        var firstPage = DaemonEvent(type: "messages")
+        firstPage.sessionId = "codex:x1"
+        firstPage.messages = [Message(id: "p1", sessionId: "codex:x1", role: .user, ts: 100, text: "run the tests again"),
+                              Message(id: "p2", sessionId: "codex:x1", role: .assistant, ts: 200, text: "All pass.")]
+        store.apply(firstPage)
+        XCTAssertEqual(store.queued["codex:x1"]?.count, 1, "the same words, from before")
+        var copy = DaemonEvent(type: "messages")
+        copy.sessionId = "codex:x1"
+        copy.messages = [Message(id: "p3", sessionId: "codex:x1", role: .user, ts: 300, text: "run the tests again")]
+        store.apply(copy)
+        XCTAssertEqual(store.queued["codex:x1"] ?? [], [])
+    }
+
     // Cursor's ts is the chat's start and a row number, not the time: in a
     // chat days old a new copy is still found, by its place after the last
     // message, and a picture by Cursor's "[image]".

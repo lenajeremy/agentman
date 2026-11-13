@@ -1321,6 +1321,7 @@ final class AgentsStore {
 
     /// Adds messages to an agent's conversation, once each, in time order.
     private func merge(_ new: [Message], into sessionId: String) {
+        let hadNone = (messages[sessionId] ?? []).isEmpty
         let (current, added) = Self.merged(messages[sessionId] ?? [], with: new)
         messages[sessionId] = current
         // A queued message that has reached the agent shows as its own.
@@ -1330,10 +1331,15 @@ final class AgentsStore {
             // land before it. By place, not time: Cursor's ts is the chat's
             // start and a row number.
             let place = Dictionary(current.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+            // Sent before the thread had loaded: its first page is all from
+            // before, so its newest message is where the copy comes after.
+            if hadNone, let newest = current.last?.id {
+                for i in waiting.indices where waiting[i].after == nil { waiting[i].after = newest }
+            }
             for message in added {
                 guard let at = place[message.id] else { continue }
                 if let index = waiting.firstIndex(where: { queued in
-                    queued.isCopy(message) && (queued.after.flatMap { place[$0] }.map { at > $0 } ?? true)
+                    queued.isCopy(message) && (queued.after.flatMap { place[$0] }.map { at > $0 } ?? false)
                 }) {
                     waiting.remove(at: index)
                 }
