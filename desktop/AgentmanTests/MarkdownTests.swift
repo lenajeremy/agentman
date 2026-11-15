@@ -47,6 +47,53 @@ final class MarkdownTests: XCTestCase {
         XCTAssertTrue(text.runs.contains { $0.link == URL(string: "https://agentman.dev") })
     }
 
+    /// The links in a paragraph: each linked stretch of words and where it goes.
+    private func links(in reply: String) -> [String] {
+        guard case .paragraph(let text)? = MarkdownView(reply).blocks.first?.kind else {
+            XCTFail("not a paragraph")
+            return []
+        }
+        return text.runs.compactMap { run in
+            run.link.map { "\(String(text[run.range].characters)) -> \($0.absoluteString)" }
+        }
+    }
+
+    // Bare addresses link as GitHub, the phone and the web app link them:
+    // the agent's "Keel at http://localhost:8812" was only words on the Mac.
+    func testBareAddressesAreLinks() {
+        XCTAssertEqual(links(in: "Keel at http://localhost:8812\nCobalt at https://localhost:8813/a_b_c."),
+                       ["http://localhost:8812 -> http://localhost:8812",
+                        "https://localhost:8813/a_b_c -> https://localhost:8813/a_b_c"])
+        XCTAssertEqual(links(in: "Open www.agentman.dev, then (see https://en.wikipedia.org/wiki/Go_(game))."),
+                       ["www.agentman.dev -> http://www.agentman.dev",
+                        "https://en.wikipedia.org/wiki/Go_(game) -> https://en.wikipedia.org/wiki/Go_(game)"])
+        XCTAssertEqual(links(in: "It's up (at https://agentman.dev/board)! Is **https://a.dev** bold?"),
+                       ["https://agentman.dev/board -> https://agentman.dev/board",
+                        "https://a.dev -> https://a.dev"])
+    }
+
+    // Code stays code, a written link keeps its own address, and an address
+    // run into a word, or a scheme with nothing after it, isn't one.
+    func testOnlyBareAddressesAreLinked() {
+        XCTAssertEqual(links(in: "Run `curl http://localhost:8812` and [the board](https://agentman.dev/board) at http://x.dev"),
+                       ["the board -> https://agentman.dev/board", "http://x.dev -> http://x.dev"])
+        XCTAssertEqual(links(in: "nohttp://a.dev, http:// alone, and xwww.a.dev"), [])
+        XCTAssertEqual(links(in: "<http://a.dev>"), ["http://a.dev -> http://a.dev"])
+    }
+
+    // In headings and table cells too.
+    func testBareAddressesLinkInHeadingsAndTables() {
+        let reply = "## Live at http://localhost:8812\n\n| Site | Where |\n|---|---|\n| Keel | http://localhost:8812 |\n"
+        let blocks = MarkdownView(reply).blocks
+        guard case .heading(_, let heading)? = blocks.first?.kind,
+              case .table(_, let rows)? = blocks.last?.kind else {
+            return XCTFail("not a heading and a table")
+        }
+        let address = URL(string: "http://localhost:8812")
+        XCTAssertTrue(heading.runs.contains { $0.link == address })
+        XCTAssertTrue(rows[0][1].runs.contains { $0.link == address })
+    }
+
     // A cell that wraps makes its row taller, so no line is cut off.
     func testATableRowGrowsWithItsWrappedCell() {
         func height(_ cell: String) -> CGFloat {

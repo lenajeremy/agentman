@@ -180,7 +180,7 @@ private struct BlockBuilder {
             if let images = Self.images(alone: paragraph) {
                 return [make(.images(images))]
             }
-            return [make(.paragraph(Inline.render(paragraph)))]
+            return [make(.paragraph(Inline.text(of: paragraph)))]
         case let html as HTMLBlock:
             return blocks(html: html.rawHTML)
         default:
@@ -191,7 +191,7 @@ private struct BlockBuilder {
     private mutating func block(from node: Markup) -> MarkdownBlock? {
         switch node {
         case let heading as Heading:
-            return make(.heading(level: heading.level, text: Inline.render(heading)))
+            return make(.heading(level: heading.level, text: Inline.text(of: heading)))
         case let code as CodeBlock:
             let text = code.code.hasSuffix("\n") ? String(code.code.dropLast()) : code.code
             return make(.code(language: code.language, code: text))
@@ -202,8 +202,8 @@ private struct BlockBuilder {
         case let list as UnorderedList:
             return make(.list(ordered: false, start: 1, items: items(of: list)))
         case let table as Markdown.Table:
-            let header = table.head.cells.map { Inline.render($0) }
-            let rows = table.body.rows.map { row in Array(row.cells.map { Inline.render($0) }) }
+            let header = table.head.cells.map { Inline.text(of: $0) }
+            let rows = table.body.rows.map { row in Array(row.cells.map { Inline.text(of: $0) }) }
             return make(.table(header: Array(header), rows: Array(rows)))
         case is ThematicBreak:
             return make(.rule)
@@ -345,7 +345,14 @@ private enum HTML {
 /// Inline nodes to one attributed string: bold, italic, code, strikethrough
 /// and links, with the code in Google Sans Code on a fill.
 private enum Inline {
-    static func render(_ node: Markup) -> AttributedString {
+    /// A paragraph's, heading's or cell's words, with its bare web addresses
+    /// linked too. They are found in the whole, not node by node: the parser
+    /// cuts text at the characters that might be markup, as an address's `_`.
+    static func text(of node: Markup) -> AttributedString {
+        Autolinks.add(to: render(node))
+    }
+
+    private static func render(_ node: Markup) -> AttributedString {
         var out = AttributedString()
         for child in node.children {
             out += render(inline: child)
@@ -405,6 +412,59 @@ private enum Inline {
         default:
             return render(node)
         }
+    }
+}
+
+/// Bare web addresses, linked as GitHub links them and as the phone and web
+/// app's parser does (mobile/lib/markdown.ts): http://, https:// and www.,
+/// which opens as http://. swift-markdown doesn't turn on GitHub's autolinks,
+/// so an agent's "Keel at http://localhost:8812" was only words.
+enum Autolinks {
+    /// An address's start, not inside a word, then anything up to a space or
+    /// a `<`; what ends a sentence comes off after.
+    private static let address = try! NSRegularExpression(
+        pattern: #"(?<![A-Za-z0-9])(?:https?://|www\.)[A-Za-z0-9-][^\s<]*"#,
+        options: [.caseInsensitive])
+
+    /// Punctuation that ends the sentence around an address, not the address.
+    private static let trailing: Set<Character> = ["?", "!", ".", ",", ":", ";", "*", "_", "'", "\"", "~"]
+
+    /// text with each bare address linked, coloured as a written link is.
+    /// Words already in a link or in code stay as they are.
+    static func add(to text: AttributedString) -> AttributedString {
+        let string = String(text.characters)
+        guard string.contains("://") || string.range(of: "www.", options: .caseInsensitive) != nil else { return text }
+        var out = text
+        let whole = NSRange(string.startIndex..., in: string)
+        for match in address.matches(in: string, range: whole) {
+            guard let found = Range(match.range, in: string) else { continue }
+            let written = trimmed(string[found])
+            let href = written.lowercased().hasPrefix("www.") ? "http://" + written : String(written)
+            guard let url = URL(string: href),
+                  let range = Range(NSRange(found.lowerBound..<written.endIndex, in: string), in: out),
+                  !out[range].runs.contains(where: { $0.link != nil || $0.inlinePresentationIntent?.contains(.code) == true })
+            else { continue }
+            out[range].link = url
+            out[range].foregroundColor = Palette.workingText
+        }
+        return out
+    }
+
+    /// address without the punctuation after it, and without a `)` it never
+    /// opened: "(see http://a.dev/x)." links http://a.dev/x, while
+    /// http://a.dev/f(x) keeps its own.
+    static func trimmed(_ address: Substring) -> Substring {
+        var address = address
+        while let last = address.last {
+            if trailing.contains(last) {
+                address.removeLast()
+            } else if last == ")", address.filter({ $0 == ")" }).count > address.filter({ $0 == "(" }).count {
+                address.removeLast()
+            } else {
+                break
+            }
+        }
+        return address
     }
 }
 
