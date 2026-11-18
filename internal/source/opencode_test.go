@@ -1223,6 +1223,9 @@ func TestOpenCodeSnapshotBoundsRequestConcurrency(t *testing.T) {
 
 func TestOpenCodeDiscoveryDoesNotFetchEveryMissingModel(t *testing.T) {
 	var messageRequests atomic.Int32
+	// An idle session's time stays put; one that changes is read for its
+	// usage limit (see limitFor).
+	updated := time.Now().UnixMilli()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/global/health":
@@ -1230,7 +1233,7 @@ func TestOpenCodeDiscoveryDoesNotFetchEveryMissingModel(t *testing.T) {
 		case r.URL.Path == "/session":
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"id": "ses_1", "title": "model probe", "directory": "/tmp/project",
-				"time": map[string]any{"updated": time.Now().UnixMilli()},
+				"time": map[string]any{"updated": updated},
 			}})
 		case r.URL.Path == "/session/status":
 			_ = json.NewEncoder(w).Encode(map[string]any{})
@@ -1268,5 +1271,89 @@ func TestOpenCodeDiscoveryDoesNotFetchEveryMissingModel(t *testing.T) {
 	}
 	if got := messageRequests.Load(); got != 1 {
 		t.Fatalf("message requests = %d, want only the explicit page read", got)
+	}
+}
+
+// An idle session whose last turn ended at its provider's usage limit is
+// out of usage, read once when it changes; a session first seen costs no
+// request.
+func TestOpenCodeSaysWhenOutOfUsage(t *testing.T) {
+	var messageRequests atomic.Int32
+	var updated atomic.Int64
+	start := time.Now().UnixMilli()
+	updated.Store(start - 60_000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/global/health":
+			_ = json.NewEncoder(w).Encode(map[string]any{"healthy": true})
+		case r.URL.Path == "/session":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "ses_1", "title": "spend", "directory": "/tmp/project",
+				"time": map[string]any{"created": start - 120_000, "updated": updated.Load()},
+			}})
+		case r.URL.Path == "/session/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		case r.URL.Path == "/question" || r.URL.Path == "/permission":
+			_ = json.NewEncoder(w).Encode([]any{})
+		case strings.HasSuffix(r.URL.Path, "/message"):
+			messageRequests.Add(1)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"info": map[string]any{
+					"id": "msg_2", "role": "assistant", "time": map[string]any{"created": 5, "completed": 7},
+					"error": map[string]any{"name": "APIError", "data": map[string]any{
+						"message": "You have exceeded your monthly usage limit. Upgrade your plan to continue.", "statusCode": 429}},
+				},
+				"parts": []any{},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	src := NewOpenCodeSource(server.URL)
+	sessions, err := src.Discover(context.Background())
+	if err != nil || len(sessions) != 1 || sessions[0].Limit != nil || messageRequests.Load() != 0 {
+		t.Fatalf("first sight: %+v %v, %d requests", sessions, err, messageRequests.Load())
+	}
+	updated.Store(start - 1_000) // the refused turn
+	sessions, _ = src.Discover(context.Background())
+	if limit := sessions[0].Limit; limit == nil || limit.Text != "You have exceeded your monthly usage limit" || limit.At != 7 {
+		t.Fatalf("after the refusal: %+v", sessions[0].Limit)
+	}
+	sessions, _ = src.Discover(context.Background())
+	if sessions[0].Limit == nil || messageRequests.Load() != 1 {
+		t.Fatalf("read again for nothing new: %d requests, limit %+v", messageRequests.Load(), sessions[0].Limit)
+	}
+	page, err := src.Page(context.Background(), sessions[0].ID, "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := page.Messages[len(page.Messages)-1]; last.Notice != protocol.NoticeLimit || last.Text != "You have exceeded your monthly usage limit" {
+		t.Fatalf("last row = %+v", last)
+	}
+}
+
+func TestOpenCodeFailures(t *testing.T) {
+	cases := []struct {
+		raw          string
+		text, notice string
+	}{
+		{`{"name":"MessageAbortedError","data":{"message":"Aborted"}}`, "Interrupted", ""},
+		{`{"type":"aborted","message":"Aborted"}`, "Interrupted", ""},
+		{`{"type":"provider.error","message":"You've reached your usage limit for this month."}`, "You've reached your usage limit for this month", protocol.NoticeLimit},
+		{`{"name":"APIError","data":{"message":"Error from provider (Console): Upstream request failed: [service_overloaded] The backend is temporarily overloaded. Please retry.","statusCode":503}}`,
+			"Error from provider (Console): Upstream request failed: [service_overloaded] The backend is temporarily overloaded. Please retry.", protocol.NoticeError},
+		{`{"name":"APIError","data":{"message":"Your credit balance is too low to access the Anthropic API.","statusCode":400}}`,
+			"Your credit balance is too low to access the Anthropic API", protocol.NoticeLimit},
+	}
+	for _, c := range cases {
+		text, notice, ok := openCodeFailure(json.RawMessage(c.raw))
+		if !ok || text != c.text || notice != c.notice {
+			t.Errorf("%s: %q %q", c.raw, text, notice)
+		}
+	}
+	if _, _, ok := openCodeFailure(nil); ok {
+		t.Error("no error is a failure")
 	}
 }

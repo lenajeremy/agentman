@@ -63,6 +63,10 @@ const (
 
 // OpenCodeSource talks to a local `opencode serve` instance.
 type OpenCodeSource struct {
+	// limitMu guards limitReadings: what each idle session's newest message
+	// said about its usage limit (see limitFor).
+	limitMu       sync.Mutex
+	limitReadings map[string]openCodeLimitReading
 	// switchMu guards the model lists and phone-chosen models below (see
 	// opencode_switch.go).
 	switchMu sync.Mutex
@@ -854,6 +858,7 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 				session.meta.Queued, session.meta.QueuedMessageIDs = texts, rows
 			}
 		}
+		session.meta.Limit = s.limitFor(ctx, id, session)
 		next[id] = session
 	}
 
@@ -863,6 +868,13 @@ func (s *OpenCodeSource) Discover(ctx context.Context) ([]protocol.Session, erro
 	}
 	s.models.forget(live)
 	s.forgetChoices(live)
+	s.limitMu.Lock()
+	for id := range s.limitReadings {
+		if !live[id] {
+			delete(s.limitReadings, id)
+		}
+	}
+	s.limitMu.Unlock()
 
 	s.mu.Lock()
 	s.sessions = next
@@ -1366,14 +1378,106 @@ func openCodeMessages(sessionID string, message ocMessage) []protocol.Message {
 
 	// A failed turn produces no content at all, so without this the agent
 	// would appear to have silently done nothing.
-	if text := openCodeErrorText(message.Info.Error); text != "" {
+	if text, notice, ok := openCodeFailure(message.Info.Error); ok {
 		out = append(out, protocol.Message{
 			ID: message.Info.ID + ":error", SessionID: sessionID,
 			Role: protocol.RoleSystem, Ts: ts,
-			Text: clipOutput(text),
+			Text: clipOutput(text), Notice: notice,
 		})
 	}
 	return out
+}
+
+// openCodeFailure is the row for a turn that ended in an error: the user
+// stopping it, the plan's or the provider's usage running out, or anything
+// else. ok is false for a turn with no error.
+func openCodeFailure(raw json.RawMessage) (text, notice string, ok bool) {
+	text = openCodeErrorText(raw)
+	if text == "" {
+		return "", "", false
+	}
+	// OpenCode names it; OpenCode 2's service types it.
+	var named struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal(raw, &named)
+	if named.Name == "MessageAbortedError" || named.Type == "aborted" {
+		return "Interrupted", "", true
+	}
+	if parser.IsUsageLimit(text) {
+		text, notice = parser.FailureNotice("OpenCode", text)
+		return text, notice, true
+	}
+	return text, protocol.NoticeError, true
+}
+
+// openCodeLimit is a session's limit as its newest message says it.
+func openCodeLimit(message ocMessage) *protocol.Limit {
+	if message.Info.Role != "assistant" {
+		return nil
+	}
+	text, notice, _ := openCodeFailure(message.Info.Error)
+	if notice != protocol.NoticeLimit {
+		return nil
+	}
+	at := message.Info.Time.Completed
+	if at == 0 {
+		at = message.Info.Time.Created
+	}
+	return &protocol.Limit{Text: text, At: at}
+}
+
+// openCodeLimitReading is what a session's newest message said, for as long
+// as the session has not changed since.
+type openCodeLimitReading struct {
+	updated int64
+	limit   *protocol.Limit
+}
+
+// limitFor reads whether an idle session's last turn ended at a usage
+// limit: its newest message, asked for once each time the session changes
+// while Agentman watches it. A session first seen is not asked about —
+// discovery must not cost a request per session (it once fetched every
+// model) — so a limit hit before Agentman started shows in the thread, not
+// on the list.
+func (s *OpenCodeSource) limitFor(ctx context.Context, id string, session openCodeSession) *protocol.Limit {
+	updated := session.meta.LastActivityAt
+	s.limitMu.Lock()
+	known, ok := s.limitReadings[id]
+	if !ok {
+		if s.limitReadings == nil {
+			s.limitReadings = map[string]openCodeLimitReading{}
+		}
+		s.limitReadings[id] = openCodeLimitReading{updated: updated}
+	}
+	s.limitMu.Unlock()
+	if !ok || known.updated == updated || session.meta.State != protocol.StateIdle || session.baseURL == "" {
+		if session.meta.State != protocol.StateIdle {
+			return nil
+		}
+		return known.limit
+	}
+	query := url.Values{"limit": {"1"}}
+	if session.directory != "" {
+		query.Set("directory", session.directory)
+	}
+	path := openCodePath(fmt.Sprintf("/session/%s/message", openCodeSegment(session.nativeID)), query)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var newest []ocMessage
+	if _, err := s.doAtLimit(ctx, session.baseURL, http.MethodGet, path, nil, &newest, maxOpenCodeMessageResponse); err != nil {
+		// Asked again next sweep; what was known stands meanwhile.
+		return known.limit
+	}
+	var limit *protocol.Limit
+	if len(newest) > 0 {
+		limit = openCodeLimit(newest[len(newest)-1])
+	}
+	s.limitMu.Lock()
+	s.limitReadings[id] = openCodeLimitReading{updated: updated, limit: limit}
+	s.limitMu.Unlock()
+	return limit
 }
 
 func openCodeErrorText(raw json.RawMessage) string {
