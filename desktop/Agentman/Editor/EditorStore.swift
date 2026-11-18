@@ -522,6 +522,34 @@ final class EditorStore {
         return .handled
     }
 
+    /// A link followed in an agent's reply in the panel: a file opens here,
+    /// at the line the link names (one outside the folder read-only, as Go
+    /// to Definition opens it), a folder in the folder shows in the tree, and
+    /// one outside it in Finder. The web opens as it would anywhere.
+    func followReplyLink(_ url: URL, folder: String?) -> OpenURLAction.Result {
+        let target: ReplyLinks.Target
+        switch ReplyLinks.decide(url, folder: folder ?? root.path) {
+        case .file(let found): target = found
+        case .missing: return ReplyLinks.missing()
+        case .elsewhere: return .systemAction
+        }
+        if target.isDirectory {
+            guard let relative = relativePath(of: target.url) else {
+                ReplyLinks.showInFinder(target)
+                return .handled
+            }
+            reveal(relative)
+            setExpanded(relative, true)
+            focusTree()
+            return .handled
+        }
+        open(fileAt: target.url)
+        if let line = target.line, let document = active {
+            monaco?.reveal(document.id, line: line, column: 1, length: 0)
+        }
+        return .handled
+    }
+
     /// Shows the Markdown file in front rendered, or its text again. The
     /// text hidden under the preview gives up the keyboard, so nothing typed
     /// edits what can't be seen.

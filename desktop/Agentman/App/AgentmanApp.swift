@@ -31,6 +31,8 @@ struct AgentmanApp: App {
                 ContentView()
                     .frame(minWidth: 1040, minHeight: 640)
                     .environment(store)
+                    // A file Agentman links to shows in Finder; see ReplyLinks.
+                    .environment(\.openURL, ReplyLinks.finder(folder: nil))
                     .task {
                         Appearance.apply(UserDefaults.standard.string(forKey: "appearance") ?? "system")
                         store.start()
