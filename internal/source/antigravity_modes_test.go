@@ -33,13 +33,13 @@ func agySwitching(t *testing.T, pane string) (*AntigravitySource, *agyKeys, stri
 	return s, keys, "antigravity:tmux-agentman-antigravity-1-a"
 }
 
-// What a pane-backed session offers: the three modes shift+tab cycles, the
+// What a pane-backed session offers: the modes shift+tab cycles, the
 // models agy lists in the form the session reports its own, and a model
 // switch that also changes agy's default.
 func TestAntigravityOffersItsModesAndModels(t *testing.T) {
 	s, _, id := agySwitching(t, agyFixture(t, "mode-accept-edits"))
 	session := s.sessions[id].meta
-	if session.Mode != "accept-edits" || strings.Join(session.Modes, ",") != "default,accept-edits,plan" {
+	if session.Mode != "accept-edits" || strings.Join(session.Modes, ",") != "default,accept-edits,auto,plan" {
 		t.Errorf("mode %q modes %q", session.Mode, session.Modes)
 	}
 	if len(session.Models) != 14 || session.Models[0] != "Gemini 3.8 Flash (high)" ||
@@ -172,5 +172,22 @@ func TestParseAntigravityModels(t *testing.T) {
 	if strings.Join(labels, "|") != "Gemini 3.8 Flash (high)|Claude Opus 4.6 (Thinking)" ||
 		ids["Gemini 3.8 Flash (high)"] != "gemini-3.8-flash-high" {
 		t.Errorf("labels %q ids %v", labels, ids)
+	}
+}
+
+// Gemini 4's xhigh reads as the footer says it, so a switch to it is
+// confirmed: the listing's "(XHigh)" and the footer's "xhigh" are one model.
+func TestAntigravityXHighIsOneModel(t *testing.T) {
+	labels, ids := parseAntigravityModels([]byte(
+		"gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)\n" +
+			"gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n" +
+			"gemini-pro-orchestrator-neon\tOrchestrator (Neon)\n"))
+	if strings.Join(labels, "|") != "Gemini 4 Hydrogen (xhigh)|Gemini 4 Hydrogen (high)|Orchestrator (Neon)" ||
+		ids["Gemini 4 Hydrogen (xhigh)"] != "gemini-4-hydrogen-xhigh" {
+		t.Fatalf("labels %q ids %v", labels, ids)
+	}
+	footer := parseAntigravityFooter([]string{"? for shortcuts      auto · Gemini 4 Hydrogen · xhigh"})
+	if footerModelLabel(footer) != labels[0] {
+		t.Fatalf("footer %q, listing %q", footerModelLabel(footer), labels[0])
 	}
 }

@@ -17,12 +17,11 @@ import (
 	"github.com/lenajeremy/agentman/internal/question"
 )
 
-// agy's modes, in the order shift+tab steps through them (agy 1.2.17):
-// default, then "Accept-edits mode: file edits auto-approved", then "Plan
-// mode: research & plan only", then back to default. The footer names the two
-// it marks ("accept-edits · Gemini 3.8 Flash · high") and shows nothing for
-// the default, which the phone calls "default".
-var antigravityModes = []string{"default", "accept-edits", "plan"}
+// agy's modes, in the order shift+tab steps through them. agy 1.5 starts in
+// auto and steps auto → plan → default → accept-edits → auto (1.5.11, read
+// off a pane); 1.2.17 had no auto. The footer names each but the default
+// ("auto · Gemini 4 Hydrogen · xhigh"), which the phone calls "default".
+var antigravityModes = []string{"default", "accept-edits", "auto", "plan"}
 
 // antigravityModeName is the mode a footer shows.
 func antigravityModeName(footer antigravityFooter) string {
@@ -327,7 +326,7 @@ func parseAntigravityModels(raw []byte) ([]string, map[string]string) {
 	return labels, ids
 }
 
-var antigravityLabelEffort = regexp.MustCompile(`^(.*\S)\s+\((Low|Medium|High|Max)\)$`)
+var antigravityLabelEffort = regexp.MustCompile(`(?i)^(.*\S)\s+\((` + antigravityEfforts + `)\)$`)
 
 // antigravityModelLabelOf writes "Gemini 3.8 Flash (High)" the way the footer
 // reads it back, "Gemini 3.8 Flash (high)". A label whose bracket is not an
