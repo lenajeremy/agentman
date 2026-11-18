@@ -573,7 +573,8 @@ struct AgentRow: View {
 
     private var dotState: StateDot.Kind {
         if waiting { return .needsYou }
-        return session.state == .busy ? .working : .idle
+        if session.state == .busy { return .working }
+        return session.limit != nil ? .outOfUsage : .idle
     }
 
     /// What it asks, while it needs you.
@@ -587,6 +588,10 @@ struct AgentRow: View {
         let folder = Worktrees.label(session.cwd)
         if waiting {
             return Text("\(folder) · \(detail)").foregroundStyle(Palette.needsYouText)
+        }
+        // When it's back is what matters while it's out, so it has the line.
+        if let limit = session.limit, session.state != .busy {
+            return Text(limit.label).foregroundStyle(Palette.errorText)
         }
         var line = Text(folder)
         if let branch = store.branches[session.cwd] {
@@ -613,7 +618,7 @@ struct AgentRow: View {
 /// orange when it needs you, the loader turning while it works, a grey
 /// ring while it waits for something to do.
 struct StateDot: View {
-    enum Kind { case needsYou, working, idle }
+    enum Kind { case needsYou, working, idle, outOfUsage }
     let state: Kind
 
     var body: some View {
@@ -630,6 +635,14 @@ struct StateDot: View {
                 .strokeBorder(Palette.faint, lineWidth: 1.5)
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)
+        case .outOfUsage:
+            // A red ring, struck through: stopped until its plan resets.
+            ZStack {
+                Circle().strokeBorder(Palette.error, lineWidth: 1.5)
+                Rectangle().fill(Palette.error).frame(width: 1.5, height: 9).rotationEffect(.degrees(45))
+            }
+            .frame(width: 8, height: 8)
+            .accessibilityLabel("Out of usage")
         }
     }
 }

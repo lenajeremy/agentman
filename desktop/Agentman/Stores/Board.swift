@@ -53,15 +53,24 @@ nonisolated struct BoardSections: Equatable, Sendable {
     func headline(connected: Bool) -> String {
         if !connected { return "Waiting to reach your agents." }
         let others = working.count + idle.count
+        // An agent out of usage isn't fine, and can't be left to get on.
+        let out = outOfUsage.count
         if !needsYou.isEmpty {
             let waiting = needsYou.count == 1 ? "1 agent is waiting on you." : "\(needsYou.count) agents are waiting on you."
+            if out > 0 { return waiting + (out == 1 ? " 1 is out of usage." : " \(out) are out of usage.") }
             return others > 0 ? waiting + " The rest are fine." : waiting
         }
         if !working.isEmpty {
             return "Nothing needs you. " + (working.count == 1 ? "1 agent is working." : "\(working.count) agents are working.")
         }
+        if out > 0 {
+            return "Nothing needs you. " + (out == 1 ? "1 agent is out of usage." : "\(out) agents are out of usage.")
+        }
         return idle.isEmpty && hidden.isEmpty ? "No agents running." : "All quiet. Nothing needs you."
     }
+
+    /// The idle agents whose plans have run out.
+    var outOfUsage: [Session] { idle.filter { $0.limit != nil } }
 
     /// The line under it: who is working, by name, and how many are idle.
     var detail: String {
@@ -72,8 +81,14 @@ nonisolated struct BoardSections: Equatable, Sendable {
             let who = more > 0 ? names.joined(separator: ", ") + " and \(more) more" : names.joined(separator: " and ")
             parts.append(who + (working.count == 1 ? " is working" : " are working"))
         }
-        if !idle.isEmpty, !working.isEmpty || !needsYou.isEmpty {
-            parts.append(idle.count == 1 ? "1 is idle" : "\(idle.count) are idle")
+        let out = outOfUsage.count
+        // Said in the headline, unless agents working took its place.
+        if out > 0, !working.isEmpty {
+            parts.append(out == 1 ? "1 is out of usage" : "\(out) are out of usage")
+        }
+        let resting = idle.count - out
+        if resting > 0, !working.isEmpty || !needsYou.isEmpty || out > 0 {
+            parts.append(resting == 1 ? "1 is idle" : "\(resting) are idle")
         }
         return parts.isEmpty ? "" : parts.joined(separator: ", ") + "."
     }

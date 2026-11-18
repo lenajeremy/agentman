@@ -199,4 +199,27 @@ final class ProtocolTests: XCTestCase {
         let older = #"{"chatModel":"claude-opus-5-5","briefModel":"claude-opus-5-5","effort":"medium","briefs":true,"autoApprove":true,"style":"","instructions":"","keySet":false}"#
         XCTAssertNil(try JSONDecoder().decode(ManagerSettings.self, from: Data(older.utf8)).rules)
     }
+
+    /// What the daemon sends for an agent out of usage, and the turn that ended there.
+    func testAnAgentOutOfUsageDecodes() throws {
+        let session = #"{"id":"codex:x","kind":"codex","name":"assets","cwd":"/w","state":"idle","limit":{"text":"You’ve hit your usage limit · try again at 7:19 PM","resetsAt":1795029540000,"at":1795021580716}}"#
+        let decoded = try JSONDecoder().decode(Session.self, from: Data(session.utf8))
+        XCTAssertEqual(decoded.limit?.text, "You’ve hit your usage limit · try again at 7:19 PM")
+        XCTAssertEqual(decoded.limit?.resets, Date(timeIntervalSince1970: 1_795_029_540))
+        let message = #"{"id":"codex-failed:t","sessionId":"codex:x","role":"system","ts":1,"text":"You’ve hit your usage limit","notice":"limit"}"#
+        XCTAssertEqual(try JSONDecoder().decode(Message.self, from: Data(message.utf8)).notice, "limit")
+        // Older daemons send neither.
+        let older = #"{"id":"a","kind":"claude","name":"a","cwd":"/w","state":"idle"}"#
+        XCTAssertNil(try JSONDecoder().decode(Session.self, from: Data(older.utf8)).limit)
+    }
+
+    func testTheLimitSaysWhenItIsBack() {
+        let now = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: .now)!
+        let later = Calendar.current.date(bySettingHour: 19, minute: 19, second: 0, of: now)!
+        XCTAssertEqual(AgentLimit.when(later, now: now), later.formatted(date: .omitted, time: .shortened))
+        let thursday = Calendar.current.date(byAdding: .day, value: 2, to: later)!
+        XCTAssertEqual(AgentLimit.when(thursday, now: now),
+                       thursday.formatted(.dateTime.weekday(.abbreviated)) + " " + thursday.formatted(date: .omitted, time: .shortened))
+        XCTAssertEqual(AgentLimit(text: "x", resetsAt: nil, at: 1).label, "Out of usage")
+    }
 }

@@ -910,6 +910,13 @@ private struct BoardCard: View {
     // MARK: - Idle
 
     @ViewBuilder private func idle(_ digest: BoardDigest) -> some View {
+        if let limit = session.limit {
+            Label(limit.label, systemImage: "gauge.with.dots.needle.100percent")
+                .font(Fonts.sans(12, .medium))
+                .foregroundStyle(Palette.errorText)
+                .lineLimit(1)
+                .help(limit.text)
+        }
         if let text = brief?.summary ?? digest.said, !text.isEmpty {
             line(text, lines: 4)
         }

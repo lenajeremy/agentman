@@ -1229,11 +1229,52 @@ struct MessageRow: View {
         case .tool:
             ToolRun(calls: [message])
         case .system:
-            Text(message.text ?? "")
-                .font(TextStyle.caption)
-                .foregroundStyle(Palette.faint)
-                .frame(maxWidth: .infinity)
+            if let notice = message.notice, notice == "limit" || notice == "error" {
+                TurnNotice(text: message.text ?? "", limit: notice == "limit")
+            } else {
+                Text(message.text ?? "")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .frame(maxWidth: .infinity)
+            }
         }
+    }
+}
+
+/// How a turn ended when it didn't end with a reply: the plan's usage ran
+/// out, or the agent's service refused it. Said plainly where the reply
+/// would be, so a thread that stops there isn't taken for one still going.
+struct TurnNotice: View {
+    let text: String
+    let limit: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Image(systemName: limit ? "gauge.with.dots.needle.100percent" : "exclamationmark.triangle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.error)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(limit ? "Out of usage" : "The turn ended with an error")
+                    .font(Fonts.sans(13, .medium))
+                    .foregroundStyle(Palette.errorText)
+                Text(text)
+                    .font(Fonts.sans(13))
+                    .foregroundStyle(Palette.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(Palette.errorWash, in: RoundedRectangle(cornerRadius: Look.site ? 12 : 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Look.site ? 12 : 10, style: .continuous)
+            .strokeBorder(Palette.error.opacity(0.25)))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            Button("Copy") { Clipboard.copy(text) }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

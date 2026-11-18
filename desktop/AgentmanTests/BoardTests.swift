@@ -71,6 +71,21 @@ final class BoardTests: XCTestCase {
         XCTAssertEqual(sort([second, first]).working.map(\.id), ["a", "b"])
     }
 
+    /// An agent out of usage is stopped, not fine: the brief says so.
+    func testTheBriefSaysWhoIsOutOfUsage() {
+        var out = session("b", .idle)
+        out.limit = AgentLimit(text: "You've hit your session limit", resetsAt: nil, at: 1)
+        let waiting = sort([session("a", .waitingInput), out])
+        XCTAssertEqual(waiting.headline(connected: true), "1 agent is waiting on you. 1 is out of usage.")
+        XCTAssertEqual(waiting.detail, "")
+        let quiet = sort([out, session("c", .idle)])
+        XCTAssertEqual(quiet.headline(connected: true), "Nothing needs you. 1 agent is out of usage.")
+        XCTAssertEqual(quiet.detail, "1 is idle.")
+        let busy = sort([out, session("c", .busy)])
+        XCTAssertEqual(busy.headline(connected: true), "Nothing needs you. 1 agent is working.")
+        XCTAssertEqual(busy.detail, "Agent c is working, 1 is out of usage.")
+    }
+
     func testTheBriefSaysWhatTheColumnsShow() {
         let waiting = sort([session("a", .waitingInput), session("b", .waitingInput), session("c", .busy)])
         XCTAssertEqual(waiting.headline(connected: true), "2 agents are waiting on you. The rest are fine.")
