@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -931,5 +932,37 @@ func TestMuseReopenListsAnOldSessionAgain(t *testing.T) {
 	}
 	if reopened, _ := registry.Reopen(context.Background(), "claude:x"); reopened {
 		t.Fatal("other agents reopen the usual way")
+	}
+}
+
+// An idle session whose last turn Muse stopped at the plan's usage limit is
+// out of usage, read once while the session is unchanged.
+func TestMuseSaysWhenOutOfUsage(t *testing.T) {
+	source, fake := startFakeMuse(t, t.TempDir())
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	fake.answers["session/list"] = func(json.RawMessage) (any, *museRPCError) {
+		return map[string]any{"sessions": []any{
+			map[string]any{"sessionId": "spent", "status": "idle", "name": "spend", "workspaceRoot": "/code/site", "updatedAt": now, "kind": "root"},
+		}, "nextCursor": nil}, nil
+	}
+	var reads atomic.Int32
+	fake.answers["session/read"] = func(json.RawMessage) (any, *museRPCError) {
+		reads.Add(1)
+		return map[string]any{
+			"session":  map[string]any{"sessionId": "spent", "status": "idle", "workspaceRoot": "/code/site", "updatedAt": now},
+			"lastTurn": map[string]any{"turnId": "t1", "terminal": "failed", "reason": "usage_limit", "error": map[string]any{"message": "This turn stopped because your usage limit was reached."}},
+		}, nil
+	}
+	for range 2 {
+		sessions, err := source.Discover(context.Background())
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("%+v %v", sessions, err)
+		}
+		if limit := sessions[0].Limit; limit == nil || limit.Text != "This turn stopped because your usage limit was reached" || limit.At == 0 {
+			t.Fatalf("limit %+v", sessions[0].Limit)
+		}
+	}
+	if reads.Load() != 1 {
+		t.Fatalf("read %d times for one unchanged session", reads.Load())
 	}
 }

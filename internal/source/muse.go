@@ -32,7 +32,11 @@ const (
 )
 
 type MuseSource struct {
-	host       *museHost
+	host *museHost
+	// limits are what each idle session's last turn said about its usage
+	// limit, read again when the session changes (see limitFor).
+	limitMu    sync.Mutex
+	limits     map[string]museLimitReading
 	home       string // Muse's data directory; for the live registry
 	holds      museHolds
 	answers    museAnswers
@@ -147,7 +151,7 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 			continue
 		}
 		seen[session.SessionID] = true
-		found = append(found, s.describe(session, open[session.SessionID]))
+		found = append(found, s.describe(ctx, session, open[session.SessionID]))
 	}
 	// Open in a terminal, or reopened from the apps: listed however quiet.
 	extra := make([]string, 0, len(open))
@@ -162,9 +166,16 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 		seen[id] = true
 		var read museRead
 		if s.host.call(ctx, "session/read", map[string]any{"sessionId": id, "excludeItems": true}, &read) == nil {
-			found = append(found, s.describe(read.Session, open[id]))
+			found = append(found, s.describe(ctx, read.Session, open[id]))
 		}
 	}
+	s.limitMu.Lock()
+	for native := range s.limits {
+		if !seen[native] {
+			delete(s.limits, native)
+		}
+	}
+	s.limitMu.Unlock()
 	// What a waiting agent asks, for the apps' question card.
 	for i := range found {
 		if found[i].State == protocol.StateWaitingInput {
@@ -179,7 +190,7 @@ func (s *MuseSource) Discover(ctx context.Context) ([]protocol.Session, error) {
 // describe is a session as the apps see it: what Muse says, plus what
 // Agentman knows of it (it drives it now, its answer is in, what it can be
 // switched to).
-func (s *MuseSource) describe(session museSession, inTerminal bool) protocol.Session {
+func (s *MuseSource) describe(ctx context.Context, session museSession, inTerminal bool) protocol.Session {
 	meta := museToSession(session, inTerminal)
 	if s.holding(session.SessionID) {
 		meta.Inject = protocol.InjectAPI
@@ -188,9 +199,47 @@ func (s *MuseSource) describe(session museSession, inTerminal bool) protocol.Ses
 	if meta.State == protocol.StateBusy && s.foregroundDone(session.SessionID) {
 		meta.State = protocol.StateIdle
 	}
+	if meta.State == protocol.StateIdle {
+		meta.Limit = s.limitFor(ctx, session.SessionID, meta.LastActivityAt)
+	}
 	s.offerModels(&meta)
 	s.offerEfforts(&meta)
 	return meta
+}
+
+type museLimitReading struct {
+	updated int64
+	limit   *protocol.Limit
+}
+
+// limitFor is an idle session's limit: whether its last turn ended at the
+// plan's usage limit ("This turn stopped because your usage limit was
+// reached."), as session/read says. Muse is on this Mac, so the read is
+// cheap, and it is made once each time the session changes.
+func (s *MuseSource) limitFor(ctx context.Context, native string, updated int64) *protocol.Limit {
+	s.limitMu.Lock()
+	known, ok := s.limits[native]
+	s.limitMu.Unlock()
+	if ok && known.updated == updated {
+		return known.limit
+	}
+	var read museRead
+	if s.host.call(ctx, "session/read", map[string]any{"sessionId": native, "excludeItems": true}, &read) != nil {
+		return known.limit
+	}
+	var limit *protocol.Limit
+	if read.LastTurn != nil {
+		if row, ok := parser.MuseTurnEnded(musePrefix+native, *read.LastTurn, updated); ok {
+			limit = parser.LimitFromRows([]protocol.Message{row})
+		}
+	}
+	s.limitMu.Lock()
+	if s.limits == nil {
+		s.limits = map[string]museLimitReading{}
+	}
+	s.limits[native] = museLimitReading{updated: updated, limit: limit}
+	s.limitMu.Unlock()
+	return limit
 }
 
 func museToSession(session museSession, inTerminal bool) protocol.Session {

@@ -296,3 +296,26 @@ func TestLimitFromRows(t *testing.T) {
 		t.Errorf("no rows: %+v", got)
 	}
 }
+
+func TestMuseTurnAtTheLimit(t *testing.T) {
+	end := MuseTurnEnd{TurnID: "t1", Terminal: "failed", Reason: "usage_limit"}
+	end.Error = &struct {
+		Message string `json:"message"`
+	}{Message: "This turn stopped because your usage limit was reached."}
+	row, ok := MuseTurnEnded("muse:s", end, 5)
+	if !ok || row.Notice != protocol.NoticeLimit || row.Text != "This turn stopped because your usage limit was reached" {
+		t.Fatalf("row %+v", row)
+	}
+	if limit := LimitFromRows([]protocol.Message{row}); limit == nil || limit.At != 5 {
+		t.Fatalf("limit %+v", limit)
+	}
+	// The reason alone.
+	row, _ = MuseTurnEnded("muse:s", MuseTurnEnd{TurnID: "t2", Terminal: "failed", Reason: "usage_limit"}, 5)
+	if row.Notice != protocol.NoticeLimit {
+		t.Fatalf("reason only: %+v", row)
+	}
+	row, _ = MuseTurnEnded("muse:s", MuseTurnEnd{TurnID: "t3", Terminal: "failed", Reason: "provider_unavailable"}, 5)
+	if row.Notice != protocol.NoticeError || row.Text != "Muse turn failed: provider_unavailable" {
+		t.Fatalf("an error: %+v", row)
+	}
+}

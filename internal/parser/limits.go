@@ -269,7 +269,7 @@ func resetTime(at int64, zone *time.Location, month, day, year, hour, minute, me
 // give no code for it: Cursor's server ("You've hit your usage limit Get
 // Cursor Pro …"), Kiro's, OpenCode's providers. A throttle that passes in a
 // moment ("rate limit exceeded, retrying") is not among them.
-var usageLimitWords = regexp.MustCompile(`(?i)\b(?:hit|reached|exceeded|used up)\s+(?:your|the)\s+(?:[\w.'’-]+\s+){0,3}(?:usage|spend(?:ing)?|plan|monthly|weekly|daily|session|quota|credit)?\s*(?:limit|quota|cap|allowance)\b|\bout of (?:usage|credits|quota)\b|\b(?:usage|quota|credit) (?:limit )?(?:exceeded|exhausted|reached)\b|\binsufficient (?:credits|quota|balance|funds)\b|\bcredit balance is too low\b|\b(?:monthly|daily|weekly|usage|request|credit)\s+(?:request\s+|usage\s+|credit\s+)?limit\s+(?:reached|exceeded|hit)\b|\b(?:monthly|daily|weekly)limitreached\b`)
+var usageLimitWords = regexp.MustCompile(`(?i)\b(?:hit|reached|exceeded|used up)\s+(?:your|the)\s+(?:[\w.'’-]+\s+){0,3}(?:usage|spend(?:ing)?|plan|monthly|weekly|daily|session|quota|credit)?\s*(?:limit|quota|cap|allowance)\b|\bout of (?:usage|credits|quota)\b|\b(?:usage|quota|credit) (?:limit )?(?:(?:was|is|has been) )?(?:exceeded|exhausted|reached)\b|\binsufficient (?:credits|quota|balance|funds)\b|\bcredit balance is too low\b|\b(?:monthly|daily|weekly|usage|request|credit)\s+(?:request\s+|usage\s+|credit\s+)?limit\s+(?:reached|exceeded|hit)\b|\b(?:monthly|daily|weekly)limitreached\b`)
 
 // IsUsageLimit reports whether an agent's error says its plan ran out.
 func IsUsageLimit(text string) bool {

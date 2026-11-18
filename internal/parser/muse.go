@@ -195,13 +195,21 @@ func MuseTurnEnded(sessionID string, end MuseTurnEnd, ts int64) (protocol.Messag
 	if end.Error != nil && strings.TrimSpace(end.Error.Message) != "" {
 		reason = end.Error.Message
 	}
-	text := "Muse turn failed"
+	text, notice := "Muse turn failed", protocol.NoticeError
 	if reason = strings.TrimSpace(reason); reason != "" {
 		text += ": " + reason
 	}
+	// The plan ran out: Muse says "This turn stopped because your usage
+	// limit was reached.", with usage_limit as its reason.
+	if IsUsageLimit(reason) || strings.Contains(end.Reason, "usage_limit") {
+		text, notice = "Your usage limit was reached", protocol.NoticeLimit
+		if IsUsageLimit(reason) {
+			text = limitSentence(reason)
+		}
+	}
 	return protocol.Message{
 		ID: "turn:" + end.TurnID + ":failed", SessionID: sessionID,
-		Role: protocol.RoleSystem, Ts: ts, Text: clip(text, PreviewChars),
+		Role: protocol.RoleSystem, Ts: ts, Text: clip(text, PreviewChars), Notice: notice,
 	}, true
 }
 
