@@ -233,6 +233,8 @@ func TestIsUsageLimit(t *testing.T) {
 		"Quota exceeded for this billing period",
 		"Insufficient credits to continue",
 		"You've used up your plan's allowance",
+		"Monthly request limit reached",
+		"Internal error: MonthlyLimitReached",
 	} {
 		if !IsUsageLimit(text) {
 			t.Errorf("not a limit: %q", text)
@@ -245,6 +247,7 @@ func TestIsUsageLimit(t *testing.T) {
 		"Selected model is at capacity. Please try a different model.",
 		"User aborted request",
 		"the limit of 10 files was reached",
+		"Concurrency Limit reached",
 	} {
 		if IsUsageLimit(text) {
 			t.Errorf("a limit: %q", text)

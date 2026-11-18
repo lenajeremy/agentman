@@ -553,12 +553,13 @@ func (s *KiroSource) Page(ctx context.Context, sessionID, before string, limit i
 		return protocol.Page{}, err
 	}
 	if session.transcript == "" {
-		return protocol.NewPage(sessionID, nil, "", false), nil
+		return s.withFailure(protocol.NewPage(sessionID, nil, "", false), before), nil
 	}
 	messages, calls, err := s.readTranscriptCalls(ctx, session.transcript, sessionID)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return protocol.NewPage(sessionID, nil, "", false), nil
+			// Refused before Kiro wrote anything: the notice is all there is.
+			return s.withFailure(protocol.NewPage(sessionID, nil, "", false), before), nil
 		}
 		return protocol.Page{}, err
 	}
@@ -582,7 +583,21 @@ func (s *KiroSource) Page(ctx context.Context, sessionID, before string, limit i
 	if start > 0 {
 		cursor = strconv.Itoa(start)
 	}
-	return protocol.NewPage(sessionID, page, cursor, start > 0), nil
+	return s.withFailure(protocol.NewPage(sessionID, page, cursor, start > 0), before), nil
+}
+
+// withFailure ends the newest page with the notice for a turn Kiro refused,
+// which its transcript has no record of.
+func (s *KiroSource) withFailure(page protocol.Page, before string) protocol.Page {
+	failed, ok := s.acpFailure(page.SessionID)
+	if !ok || before != "" {
+		return page
+	}
+	if n := len(page.Messages); n > 0 && page.Messages[n-1].Ts >= failed.Ts {
+		failed.Ts = page.Messages[n-1].Ts + 1
+	}
+	page.Messages = append(page.Messages, failed)
+	return page
 }
 
 // readTranscript parses a whole transcript into its feed, reusing the last
@@ -715,6 +730,11 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 	var stream kiroStreamPreview
 	// The calls an ACP session is running; see kiro_acp.go.
 	var calls kiroACPFollow
+	// The refused turn's notice last sent, so each is sent once.
+	sentFailure := ""
+	if failed, ok := s.acpFailure(sessionID); ok {
+		sentFailure = failed.ID
+	}
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
@@ -759,6 +779,10 @@ func (s *KiroSource) Follow(ctx context.Context, sessionID string, out chan<- []
 		}
 		if path != "" {
 			batch = append(batch, children.read(ctx, s, p.SubagentCalls(), time.Now())...)
+		}
+		if failed, ok := s.acpFailure(sessionID); ok && failed.ID != sentFailure {
+			sentFailure = failed.ID
+			batch = append(batch, failed)
 		}
 		if len(batch) == 0 {
 			continue

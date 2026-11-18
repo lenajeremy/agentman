@@ -117,6 +117,13 @@ func (f *fakeKiro) dial(_ string, handle func(acpEnvelope)) (*acpClient, error) 
 				_ = json.Unmarshal(message.Params, &params)
 				text := params.Prompt[0].Text
 				go func(id json.RawMessage) {
+					if text == "spend" {
+						// As Kiro's service refuses a turn once the month's
+						// requests are used.
+						write(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{
+							"code": -32603, "message": "Internal error", "data": "Monthly request limit reached"}})
+						return
+					}
 					if text == "hang" {
 						<-f.cancel
 						write(map[string]any{"jsonrpc": "2.0", "id": id, "result": map[string]any{"stopReason": "cancelled"}})
@@ -410,5 +417,38 @@ func TestKiroPanelLines(t *testing.T) {
 	want := "breakdown:\n  contextFiles:\n    items:\n      - AGENTS.md  matched false, tokens 0\n    tokens: 0\ncontextUsagePercentage: 3.9\nmodel: auto"
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Fatalf("lines:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A turn Kiro refused at the plan's limit ends the thread with a notice and
+// marks the session out of usage, until the next prompt.
+func TestKiroACPSaysWhenOutOfUsage(t *testing.T) {
+	src, _ := kiroWithACP(t)
+	src.home = t.TempDir()
+	id, err := src.StartACPSession(context.Background(), t.TempDir(), "spend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := awaitKiro(t, src, id, "out of usage", func(s protocol.Session) bool { return s.Limit != nil })
+	if out.State != protocol.StateIdle || out.Limit.Text != "Monthly request limit reached" || out.Limit.At == 0 {
+		t.Fatalf("session = %+v, limit %+v", out, out.Limit)
+	}
+	page, err := src.Page(context.Background(), id, "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := page.Messages[len(page.Messages)-1]
+	if last.Role != protocol.RoleSystem || last.Notice != protocol.NoticeLimit || last.Text != "Monthly request limit reached" || last.SessionID != id {
+		t.Fatalf("last row = %+v", last)
+	}
+	if _, err := src.Inject(context.Background(), id, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	awaitKiro(t, src, id, "back", func(s protocol.Session) bool { return s.Limit == nil })
+	page, _ = src.Page(context.Background(), id, "", 30)
+	for _, row := range page.Messages {
+		if row.Notice != "" {
+			t.Fatalf("the old refusal is still shown: %+v", row)
+		}
 	}
 }

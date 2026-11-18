@@ -92,6 +92,12 @@ type kiroACPSession struct {
 	// prompt at a time, so each goes when the turn before it ends.
 	queued []string
 	idle   *time.Timer
+	// failure is the notice for the last turn when Kiro refused it — its
+	// plan's limit, or another error — until the next prompt. Kiro writes
+	// nothing to its transcript for one, so without it the thread just
+	// stopped at the user's message.
+	failure *protocol.Message
+	failSeq int
 }
 
 type kiroACPPermission struct {
@@ -308,6 +314,7 @@ func (s *KiroSource) promptACP(st *kiroACPSession, text string) error {
 		return errors.New("source: this Kiro session is not running")
 	}
 	st.busy, st.text, st.tools, st.toolOrder = true, "", nil, nil
+	st.failure = nil
 	st.active = time.Now().UnixMilli()
 	s.restartIdleLocked(st)
 	s.acp.mu.Unlock()
@@ -324,10 +331,19 @@ func (s *KiroSource) promptACP(st *kiroACPSession, text string) error {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), kiroACPTurnLimit)
 		defer cancel()
-		if err := client.await(ctx, id, reply, nil); err != nil {
+		err := client.await(ctx, id, reply, nil)
+		if err != nil {
 			log.Printf("kiro acp: turn in %s ended: %v", native, err)
 		}
 		s.acp.mu.Lock()
+		if err != nil && ctx.Err() == nil {
+			text, notice := parser.FailureNotice("Kiro", err.Error())
+			st.failSeq++
+			st.failure = &protocol.Message{
+				ID: fmt.Sprintf("kiro-acp:failed:%s:%d", native, st.failSeq), Role: protocol.RoleSystem,
+				Ts: time.Now().UnixMilli(), Text: text, Notice: notice,
+			}
+		}
 		st.busy, st.pending, st.text, st.tools, st.toolOrder = false, nil, "", nil, nil
 		st.active = time.Now().UnixMilli()
 		var next string
@@ -635,6 +651,7 @@ func (s *KiroSource) applyACP(found []protocol.Session, next map[string]kiroSess
 		if st.previous != "" {
 			meta.Previous = st.previous
 		}
+		meta.Limit = nil
 		switch {
 		case st.pending != nil:
 			meta.State, meta.Question = protocol.StateWaitingInput, st.pending.question
@@ -642,6 +659,9 @@ func (s *KiroSource) applyACP(found []protocol.Session, next map[string]kiroSess
 			meta.State = protocol.StateBusy
 		default:
 			meta.State = protocol.StateIdle
+			if st.failure != nil {
+				meta.Limit = parser.LimitFromRows([]protocol.Message{*st.failure})
+			}
 		}
 		meta.Queued = slices.Clone(st.queued)
 		meta.Mode, meta.Modes = st.mode, slices.Clone(st.modes)
@@ -679,6 +699,23 @@ func (s *KiroSource) acpReply(sessionID string) (string, bool) {
 	s.acp.mu.Lock()
 	defer s.acp.mu.Unlock()
 	return st.text, true
+}
+
+// acpFailure is the notice for an ACP session's last turn when Kiro
+// refused it.
+func (s *KiroSource) acpFailure(sessionID string) (protocol.Message, bool) {
+	st, owned := s.acpOwned(sessionID)
+	if !owned {
+		return protocol.Message{}, false
+	}
+	s.acp.mu.Lock()
+	defer s.acp.mu.Unlock()
+	if st.failure == nil {
+		return protocol.Message{}, false
+	}
+	row := *st.failure
+	row.SessionID = sessionID
+	return row, true
 }
 
 // acpTools are the running turn's calls as live rows.
