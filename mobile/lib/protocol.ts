@@ -154,6 +154,19 @@ export interface Session {
   /** The folder's logo (its favicon, logo.png or icon.png), relative to cwd,
    *  shown in place of its initials. Absent when it has none. */
   folderIcon?: string;
+  /** Set while the agent is out of usage: its last turn ended at its plan's
+   *  limit, and the reset it named hasn't come. */
+  limit?: AgentLimit;
+}
+
+/** An agent's plan running out: its own line for it, and when it said its
+ *  usage comes back. */
+export interface AgentLimit {
+  /** "You've hit your session limit · resets 5:20pm (Europe/Dublin)". */
+  text: string;
+  /** When it resets, in Unix milliseconds; absent when the agent didn't say. */
+  resetsAt?: number;
+  at: number;
 }
 
 /** A local web server an agent started, which the phone can open. */
@@ -206,6 +219,9 @@ export interface Message {
    *  the agent recorded it, never from its words. */
   images?: string[];
   isSidechain?: boolean;
+  /** What a system row is about: "limit" for a turn that ended at the plan's
+   *  usage limit, "error" for one that ended with another error. */
+  notice?: string;
 }
 
 export interface Page {
@@ -1604,7 +1620,13 @@ function isSession(value: unknown): value is Session {
     (value.previous === undefined || boundedString(value.previous, 512, true)) &&
     // Any word, so a newer Mac's move does not hide the session; the menu
     // offers only the moves it knows (handoffItem).
-    (value.handoff === undefined || boundedString(value.handoff, 32, true));
+    (value.handoff === undefined || boundedString(value.handoff, 32, true)) &&
+    (value.limit === undefined || isAgentLimit(value.limit));
+}
+
+function isAgentLimit(value: unknown): value is AgentLimit {
+  return isRecord(value) && boundedString(value.text, 4096) && finiteNumber(value.at) &&
+    (value.resetsAt === undefined || finiteNumber(value.resetsAt));
 }
 
 /** More waiting messages than anyone types ahead of an agent; past it the
@@ -1795,7 +1817,8 @@ function isMessage(value: unknown): value is Message {
       !boundedString(value.sessionId, 512, true) ||
       !isOneOf(value.role, ["user", "assistant", "tool", "system"] as const) ||
       !finiteNumber(value.ts) || !optionalBoundedString(value.text, 512 * 1024) ||
-      (value.isSidechain !== undefined && typeof value.isSidechain !== "boolean")) return false;
+      (value.isSidechain !== undefined && typeof value.isSidechain !== "boolean") ||
+      !optionalBoundedString(value.notice, 64)) return false;
   if (value.tool === undefined) return true;
   // A title the app cannot use is dropped, not the message with it.
   if (isRecord(value.tool) && value.tool.title !== undefined && !optionalBoundedString(value.tool.title, 4096)) {

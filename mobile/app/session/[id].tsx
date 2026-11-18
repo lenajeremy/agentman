@@ -33,6 +33,7 @@ import { FindContext, Marked } from "../../components/FindMarks";
 import { markWords, searchable } from "../../lib/search";
 import type { SearchHit } from "../../lib/protocol";
 import { NoticeRow } from "../../components/NoticeRow";
+import { TurnNotice } from "../../components/TurnNotice";
 import { SentImages } from "../../components/SentImages";
 import { SentFileChips } from "../../components/SentFileChips";
 import { ToolGroup } from "../../components/ToolGroup";
@@ -2115,6 +2116,13 @@ function MessageRow({
   }
 
   if (message.role === "system") {
+    if (message.notice === "limit" || message.notice === "error") {
+      return (
+        <Appear enabled={fresh}>
+          <TurnNotice text={message.text ?? ""} limit={message.notice === "limit"} />
+        </Appear>
+      );
+    }
     return (
       <Appear enabled={fresh}>
         <NoticeRow text={message.text ?? ""} />

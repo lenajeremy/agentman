@@ -32,6 +32,7 @@ import { canDismiss } from "../lib/dismissed";
 import { emptyBoard, folderContains, folderLabel } from "../lib/folders";
 import { Session, type SearchHit, type SearchResults } from "../lib/protocol";
 import { markedSegments, markWords, searchable } from "../lib/search";
+import { outOfUsageLabel } from "../lib/out-of-usage";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
 import { useUpdates } from "../lib/updates-context";
@@ -514,6 +515,8 @@ function AgentRow({
 
   const busy = displayState === "busy";
   const ended = displayState === "ended";
+  // Stopped until its plan resets: said under its name, and marked on it.
+  const outOfUsage = !busy && !ended ? session.limit : undefined;
   return (
     <MotionPressable
       onPress={open}
@@ -527,7 +530,7 @@ function AgentRow({
       ]}
       pressedScale={0.985}
       accessibilityRole="button"
-      accessibilityLabel={`${session.name}, ${stateStyle(displayState, color).label}`}
+      accessibilityLabel={`${session.name}, ${outOfUsage ? outOfUsageLabel(outOfUsage) : stateStyle(displayState, color).label}`}
     >
       <View
         style={[
@@ -549,6 +552,10 @@ function AgentRow({
         ) : displayState !== "idle" && displayState !== "ended" ? (
           <View style={styles.avatarPulse}>
             <Pulse state={displayState} size={7} />
+          </View>
+        ) : outOfUsage ? (
+          <View style={styles.avatarLoader}>
+            <Feather name="slash" size={10} color={color.error} />
           </View>
         ) : null}
       </View>
@@ -598,6 +605,14 @@ function AgentRow({
         ) : null}
         {needsYou ? (
           <Text style={styles.needsYouNote}>Waiting on your answer</Text>
+        ) : null}
+        {outOfUsage ? (
+          <View style={styles.limitLine}>
+            <Feather name="slash" size={11} color={color.error} />
+            <Text style={styles.limitNote} numberOfLines={1}>
+              {outOfUsageLabel(outOfUsage)}
+            </Text>
+          </View>
         ) : null}
         {match ? <SnippetLine hit={match} query={query ?? ""} /> : null}
       </View>
@@ -1251,6 +1266,8 @@ const makeSiteStyles = (c: Palette) =>
       paddingHorizontal: space.xxs,
     },
     searchStatusText: { ...font.sans, fontSize: size.caption, color: c.muted, flexShrink: 1 },
+    limitLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+    limitNote: { flexShrink: 1, ...font.sansMedium, fontSize: size.caption, color: c.errorText },
     needsYouNote: {
       ...font.sansMedium,
       fontSize: size.caption,
@@ -1663,6 +1680,8 @@ const makeClassicStyles = (c: Palette) =>
       paddingHorizontal: space.xxs,
     },
     searchStatusText: { ...font.sans, fontSize: size.caption, color: c.muted, flexShrink: 1 },
+    limitLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+    limitNote: { flexShrink: 1, ...font.sansMedium, fontSize: size.caption, color: c.errorText },
     needsYouNote: {
       ...font.sansMedium,
       fontSize: size.caption,
