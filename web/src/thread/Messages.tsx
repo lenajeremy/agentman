@@ -163,6 +163,17 @@ export function MessageRow({ message }: { message: Message }) {
     case "assistant":
       return <AgentReply message={message} />;
     case "system":
+      if (message.notice === "limit" || message.notice === "error") {
+        // How the turn ended when it didn't end with a reply, said where the
+        // reply would be.
+        const limit = message.notice === "limit";
+        return (
+          <div className="turn-notice" role="note">
+            <span className="turn-notice-title">{limit ? "Out of usage" : "The turn ended with an error"}</span>
+            <span className="turn-notice-text">{message.text ?? ""}</span>
+          </div>
+        );
+      }
       return <div className="system">{message.text ?? ""}</div>;
     default:
       return null;
