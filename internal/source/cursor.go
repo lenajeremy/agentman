@@ -62,6 +62,8 @@ const cursorNameChars = 48
 // CursorSource observes Cursor agent transcripts.
 type CursorSource struct {
 	home string
+	// limits follows whether each session is out of usage; see limits.go.
+	limits limitWatch
 	// models is kept for interface symmetry with the other file-backed
 	// adapters. Cursor transcripts name no model, so it only ever caches
 	// misses — which still saves a re-read per sweep per session.
@@ -310,6 +312,7 @@ func (s *CursorSource) Discover(ctx context.Context) ([]protocol.Session, error)
 			s.models.put(id, "")
 		}
 
+		session.Limit = s.limits.limit(ctx, id, c.transcript, session.State, parser.CursorLimitLine)
 		found = append(found, session)
 		next[id] = cursorSession{meta: session, transcript: c.transcript}
 		live[id] = true
@@ -322,6 +325,7 @@ func (s *CursorSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	})
 
 	s.models.forget(live)
+	s.limits.forget(live)
 	s.forgetCursorPaths(livePaths)
 
 	s.mu.Lock()

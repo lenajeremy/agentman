@@ -93,3 +93,22 @@ func TestLimitWatchReadsOnlyChanges(t *testing.T) {
 		t.Errorf("read %d lines for three sweeps of one unchanged file", reads)
 	}
 }
+
+// A JSON-RPC server may put the reason in the error's data.
+func TestACPErrorKeepsItsDetail(t *testing.T) {
+	cases := []struct {
+		err  acpRPCError
+		want string
+	}{
+		{acpRPCError{Message: "Internal error", Data: []byte(`{"details":"You've hit your usage limit"}`)}, "Internal error: You've hit your usage limit"},
+		{acpRPCError{Message: "Internal error", Data: []byte(`"Quota exceeded"`)}, "Internal error: Quota exceeded"},
+		{acpRPCError{Message: "You've hit your usage limit", Data: []byte(`{"message":"You've hit your usage limit"}`)}, "You've hit your usage limit"},
+		{acpRPCError{Message: "Method not found"}, "Method not found"},
+		{acpRPCError{Data: []byte(`{"error":"Out of credits"}`)}, "Out of credits"},
+	}
+	for _, c := range cases {
+		if got := c.err.text(); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.err, got, c.want)
+		}
+	}
+}

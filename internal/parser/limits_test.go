@@ -222,3 +222,74 @@ func TestClaudeLimitLineReadsSpacedJSON(t *testing.T) {
 		t.Fatalf("got %v, %v", limit, decides)
 	}
 }
+
+func TestIsUsageLimit(t *testing.T) {
+	for _, text := range []string{
+		"You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.",
+		"You've hit your session limit · resets 5:20pm (Europe/Dublin)",
+		"You've reached your Fable 5 limit. Run /usage-credits to continue or switch models with /model.",
+		"You're out of usage credits. Run /usage-credits to keep using Fable 5",
+		"You have reached your monthly usage limit",
+		"Quota exceeded for this billing period",
+		"Insufficient credits to continue",
+		"You've used up your plan's allowance",
+	} {
+		if !IsUsageLimit(text) {
+			t.Errorf("not a limit: %q", text)
+		}
+	}
+	for _, text := range []string{
+		"Rate limit exceeded, retrying in 5s",
+		"You have exceeded the rate limit for this endpoint",
+		"API Error: Request rejected (429) · Rate limited",
+		"Selected model is at capacity. Please try a different model.",
+		"User aborted request",
+		"the limit of 10 files was reached",
+	} {
+		if IsUsageLimit(text) {
+			t.Errorf("a limit: %q", text)
+		}
+	}
+}
+
+func TestLimitSentence(t *testing.T) {
+	cases := map[string]string{
+		"You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more.": "You've hit your usage limit",
+		"You've reached your Fable 5 limit. Run /usage-credits to continue":                         "You've reached your Fable 5 limit",
+		"Quota exceeded for this billing period":                                                    "Quota exceeded for this billing period",
+	}
+	for in, want := range cases {
+		if got := limitSentence(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFailureNotice(t *testing.T) {
+	text, notice := FailureNotice("Cursor", "Internal error: You've hit your usage limit Get Cursor Pro for more Agent usage.")
+	if text != "You've hit your usage limit" || notice != protocol.NoticeLimit {
+		t.Errorf("a limit: %q %q", text, notice)
+	}
+	text, notice = FailureNotice("Kiro", "Kiro ACP process exited")
+	if text != "Kiro stopped: Kiro ACP process exited" || notice != protocol.NoticeError {
+		t.Errorf("an error: %q %q", text, notice)
+	}
+}
+
+func TestLimitFromRows(t *testing.T) {
+	limit := protocol.Message{Role: protocol.RoleSystem, Notice: protocol.NoticeLimit, Text: "You've hit your usage limit", Ts: 9}
+	user := protocol.Message{Role: protocol.RoleUser, Text: "go on"}
+	plain := protocol.Message{Role: protocol.RoleSystem, Text: "Interrupted"}
+	if got := LimitFromRows([]protocol.Message{user, limit}); got == nil || got.Text != "You've hit your usage limit" || got.At != 9 {
+		t.Errorf("ended at the limit: %+v", got)
+	}
+	if got := LimitFromRows([]protocol.Message{user, limit, plain}); got == nil {
+		t.Error("a notice after it hid the limit")
+	}
+	if got := LimitFromRows([]protocol.Message{limit, user}); got != nil {
+		t.Errorf("a prompt after the limit: %+v", got)
+	}
+	if got := LimitFromRows(nil); got != nil {
+		t.Errorf("no rows: %+v", got)
+	}
+}

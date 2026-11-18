@@ -429,6 +429,9 @@ func (s *CursorCLISource) Discover(ctx context.Context) ([]protocol.Session, err
 			// No pane to read it from: the chat's store records it.
 			entry.Mode = s.cursorCLIStoreMode(ctx, chat.store)
 		}
+		if entry.State == protocol.StateIdle {
+			entry.Limit = s.cursorCLILimit(ctx, chat.id)
+		}
 		if wrapped {
 			entry.AgentPID = pane.PanePID
 			entry.Question = currentQuestion

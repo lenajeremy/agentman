@@ -139,8 +139,17 @@ func TestCursorParseTurnEnded(t *testing.T) {
 	if msgs[0].Role != protocol.RoleSystem {
 		t.Errorf("expected system role, got %q", msgs[0].Role)
 	}
-	if msgs[0].Text != "Cursor turn failed: User aborted request" {
-		t.Errorf("unexpected text: %q", msgs[0].Text)
+	// The user stopping it is an interruption, not an error.
+	if msgs[0].Text != "Interrupted" || msgs[0].Notice != "" {
+		t.Errorf("unexpected row: %+v", msgs[0])
+	}
+	msgs = p.Parse(`{"type":"turn_ended","status":"error","error":"You've hit your usage limit Get Cursor Pro for more Agent usage, unlimited Tab, and more."}`, 9)
+	if len(msgs) != 1 || msgs[0].Text != "You've hit your usage limit" || msgs[0].Notice != protocol.NoticeLimit {
+		t.Errorf("a limit: %+v", msgs)
+	}
+	msgs = p.Parse(`{"type":"turn_ended","status":"error","error":"Agent turn stopped after repeated resume attempts made no progress"}`, 11)
+	if len(msgs) != 1 || msgs[0].Notice != protocol.NoticeError || msgs[0].Text != "Agent turn stopped after repeated resume attempts made no progress" {
+		t.Errorf("an error: %+v", msgs)
 	}
 }
 

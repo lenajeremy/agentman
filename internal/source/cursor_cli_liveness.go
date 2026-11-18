@@ -239,11 +239,31 @@ func readCursorCLITurn(ctx context.Context, path string) (cursorCLITurn, bool) {
 // belongs, and an older failure is not reconstructed later.
 func cursorCLIFailureNotice(sessionID string, turn cursorCLITurn, after int64) protocol.Message {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", turn.offset, turn.failure)))
+	text, notice := "Cursor stopped: "+turn.failure, protocol.NoticeError
+	if parser.IsUsageLimit(turn.failure) {
+		text, notice, _ = parser.CursorTurnNotice("error", turn.failure)
+	}
 	return protocol.Message{
 		ID: "cursor-cli:turn-error:" + hex.EncodeToString(sum[:8]), SessionID: sessionID,
 		Role: protocol.RoleSystem, Ts: after + 1,
-		Text: clipRunes("Cursor stopped: "+turn.failure, parser.PreviewChars),
+		Text: clipRunes(text, parser.PreviewChars), Notice: notice,
 	}
+}
+
+// cursorCLILimit is the chat's limit while its last turn ended at the plan's
+// usage limit. The transcript holds no times, so the turn's end is when the
+// file last changed.
+func (s *CursorCLISource) cursorCLILimit(ctx context.Context, chatID string) *protocol.Limit {
+	turn, ok := s.cursorCLITurnState(ctx, chatID)
+	if !ok || turn.state != protocol.StateIdle || !parser.IsUsageLimit(turn.failure) {
+		return nil
+	}
+	text, _, _ := parser.CursorTurnNotice("error", turn.failure)
+	limit := &protocol.Limit{Text: text}
+	if info, err := os.Stat(s.cursorCLITranscript(chatID)); err == nil {
+		limit.At = info.ModTime().UnixMilli()
+	}
+	return limit
 }
 
 // cursorCLITranscriptVersion folds a chat's transcript into the follow

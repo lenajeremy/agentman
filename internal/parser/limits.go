@@ -264,3 +264,111 @@ func resetTime(at int64, zone *time.Location, month, day, year, hour, minute, me
 	}
 	return when.UnixMilli()
 }
+
+// usageLimitWords are how agents word a plan that has run out, for those that
+// give no code for it: Cursor's server ("You've hit your usage limit Get
+// Cursor Pro …"), Kiro's, OpenCode's providers. A throttle that passes in a
+// moment ("rate limit exceeded, retrying") is not among them.
+var usageLimitWords = regexp.MustCompile(`(?i)\b(?:hit|reached|exceeded|used up)\s+(?:your|the)\s+(?:[\w.'’-]+\s+){0,3}(?:usage|spend(?:ing)?|plan|monthly|weekly|daily|session|quota|credit)?\s*(?:limit|quota|cap|allowance)\b|\bout of (?:usage|credits|quota)\b|\b(?:usage|quota|credit) (?:limit )?(?:exceeded|exhausted|reached)\b|\binsufficient (?:credits|quota)\b`)
+
+// IsUsageLimit reports whether an agent's error says its plan ran out.
+func IsUsageLimit(text string) bool {
+	match := usageLimitWords.FindString(text)
+	return match != "" && !strings.Contains(strings.ToLower(match), "rate")
+}
+
+// upsellStart is a capital starting a new sentence with no full stop before it.
+var upsellStart = regexp.MustCompile(`^\s+[A-Z]`)
+
+// limitSentence is an agent's refusal in one short line: up to the first
+// sentence's end, or where an upsell starts on the same line ("… limit Get
+// Cursor Pro for more"), without links.
+func limitSentence(text string) string {
+	text = firstLine(text)
+	// The sentence the limit is in, without what an error wrapped it in
+	// ("session/prompt: You've hit …").
+	if m := usageLimitWords.FindStringIndex(text); m != nil {
+		start := max(strings.LastIndex(text[:m[0]], ". "), strings.LastIndex(text[:m[0]], ": "))
+		if start >= 0 {
+			text = text[start+2:]
+		}
+	}
+	if end := strings.Index(text, ". "); end > 0 {
+		text = text[:end]
+	}
+	if m := usageLimitWords.FindStringIndex(text); m != nil {
+		// Words after the match that start a new sentence without a full
+		// stop: a capital after the limit's last word.
+		rest := text[m[1]:]
+		if upsellStart.MatchString(rest) {
+			text = text[:m[1]]
+		}
+	}
+	return strings.TrimSuffix(strings.TrimSpace(text), ".")
+}
+
+// CursorTurnNotice is the row for a Cursor turn that ended without success:
+// the plan's limit, another error, or the user stopping it. ok is false for
+// a turn that went well.
+func CursorTurnNotice(status, failure string) (text, notice string, ok bool) {
+	failure = strings.TrimSpace(failure)
+	switch {
+	case status == "" || status == "success":
+		return "", "", false
+	case status == "aborted" || strings.EqualFold(failure, "User aborted request"):
+		return "Interrupted", "", true
+	case IsUsageLimit(failure):
+		return limitSentence(failure), protocol.NoticeLimit, true
+	case failure == "":
+		return "Cursor stopped: " + status, protocol.NoticeError, true
+	}
+	return failure, protocol.NoticeError, true
+}
+
+// CursorLimitLine reads what one Cursor transcript line says about the
+// plan's limit. Its records carry no time; the caller fills At.
+func CursorLimitLine(line string) (*protocol.Limit, bool) {
+	var rec cursorRecord
+	if !decode(line, &rec) {
+		return nil, false
+	}
+	if rec.Role == "user" || rec.Role == "assistant" {
+		return nil, true
+	}
+	if rec.Role != "" || rec.Type != "turn_ended" {
+		return nil, false
+	}
+	if text, notice, _ := CursorTurnNotice(rec.Status, rec.Error); notice == protocol.NoticeLimit {
+		return &protocol.Limit{Text: text}, true
+	}
+	return nil, true
+}
+
+// FailureNotice is the row for a turn an agent's service refused, from the
+// error it gave: the plan's limit, said in the agent's words, or another
+// error, said as "Cursor stopped: …".
+func FailureNotice(agent, failure string) (text, notice string) {
+	failure = strings.TrimSpace(failure)
+	if IsUsageLimit(failure) {
+		return limitSentence(failure), protocol.NoticeLimit
+	}
+	return agent + " stopped: " + failure, protocol.NoticeError
+}
+
+// LimitFromRows is a session's limit as its newest rows say it: set when a
+// limit notice comes after the last thing the user or the agent did. For
+// sessions whose rows Agentman holds itself (an agent it runs over ACP or
+// MSP) rather than reads from a transcript.
+func LimitFromRows(rows []protocol.Message) *protocol.Limit {
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if row.Role == protocol.RoleSystem {
+			if row.Notice == protocol.NoticeLimit {
+				return &protocol.Limit{Text: row.Text, At: row.Ts}
+			}
+			continue
+		}
+		return nil
+	}
+	return nil
+}

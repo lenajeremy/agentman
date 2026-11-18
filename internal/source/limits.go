@@ -52,6 +52,10 @@ func (w *limitWatch) limit(ctx context.Context, id, path string, state protocol.
 	w.mu.Unlock()
 	if !ok || known.size != info.Size() || !known.mod.Equal(info.ModTime()) {
 		known = limitReading{size: info.Size(), mod: info.ModTime(), limit: readLimit(ctx, path, line)}
+		// A transcript without times: the refusal is its last change.
+		if known.limit != nil && known.limit.At == 0 {
+			known.limit.At = info.ModTime().UnixMilli()
+		}
 		if ctx.Err() != nil {
 			return nil
 		}

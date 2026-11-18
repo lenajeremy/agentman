@@ -2,6 +2,7 @@ package source
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,10 +37,40 @@ type acpEnvelope struct {
 	Method string          `json:"method,omitempty"`
 	Params json.RawMessage `json:"params,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
-	Error  *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
+	Error  *acpRPCError    `json:"error,omitempty"`
+}
+
+// acpRPCError is a JSON-RPC error. Data is where a server puts the detail
+// its message leaves out: an agent refusing a turn at its plan's limit may
+// answer "Internal error" with the reason here.
+type acpRPCError struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// text is the message, with the detail Data adds when it says more.
+func (e *acpRPCError) text() string {
+	message := strings.TrimSpace(e.Message)
+	var detail string
+	if json.Unmarshal(e.Data, &detail) != nil {
+		var fields struct {
+			Message string `json:"message"`
+			Details string `json:"details"`
+			Error   string `json:"error"`
+		}
+		if json.Unmarshal(e.Data, &fields) == nil {
+			detail = cmp.Or(fields.Message, fields.Details, fields.Error)
+		}
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" || strings.Contains(message, detail) {
+		return message
+	}
+	if message == "" {
+		return detail
+	}
+	return message + ": " + detail
 }
 
 func (c *acpClient) read(stdout io.Reader) {
@@ -76,10 +108,7 @@ func (c *acpClient) read(stdout io.Reader) {
 	c.mu.Lock()
 	for id, ch := range c.pending {
 		delete(c.pending, id)
-		ch <- acpEnvelope{Error: &struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}{Message: c.name + " ACP process exited"}}
+		ch <- acpEnvelope{Error: &acpRPCError{Message: c.name + " ACP process exited"}}
 	}
 	c.mu.Unlock()
 }
@@ -124,7 +153,7 @@ func (c *acpClient) await(ctx context.Context, id int, ch chan acpEnvelope, dest
 	select {
 	case response := <-ch:
 		if response.Error != nil {
-			return errors.New(response.Error.Message)
+			return errors.New(response.Error.text())
 		}
 		if dest != nil {
 			return json.Unmarshal(response.Result, dest)

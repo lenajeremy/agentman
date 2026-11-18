@@ -164,8 +164,11 @@ func TestCursorCLITranscriptGivesStateAndTheFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := page.Messages[len(page.Messages)-1]
-	if last.Role != protocol.RoleSystem || !strings.HasPrefix(last.Text, "Cursor stopped: You've hit your usage limit") {
-		t.Fatalf("last message = %+v, want the failure", last)
+	if last.Role != protocol.RoleSystem || last.Text != "You've hit your usage limit" || last.Notice != protocol.NoticeLimit {
+		t.Fatalf("last message = %+v, want the limit", last)
+	}
+	if limit := sessions[0].Limit; limit == nil || limit.Text != "You've hit your usage limit" || limit.At == 0 {
+		t.Fatalf("the chat is not out of usage: %+v", sessions[0].Limit)
 	}
 	again, _ := source.Page(context.Background(), sessions[0].ID, "", 10)
 	if again.Messages[len(again.Messages)-1].ID != last.ID {
