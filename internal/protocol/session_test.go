@@ -15,6 +15,7 @@ func waiting() Session {
 				{Key: "2", Label: "No"},
 			},
 		},
+		Limit: &Limit{Text: "You've hit your session limit", At: 1},
 	}
 }
 
@@ -196,5 +197,17 @@ func TestSameAsCoversEveryField(t *testing.T) {
 		if base.SameAs(changed) {
 			t.Errorf("SameAs ignores a change to %s", name)
 		}
+	}
+}
+
+// Two readings of one limit are the same, though each sweep makes its own.
+func TestSameAsComparesLimitsByValue(t *testing.T) {
+	first, second := waiting(), waiting()
+	if !first.SameAs(second) {
+		t.Fatal("the same limit read twice counts as a change")
+	}
+	second.Limit.ResetsAt = 5
+	if first.SameAs(second) {
+		t.Fatal("a new reset time is not a change")
 	}
 }

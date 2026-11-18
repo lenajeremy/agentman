@@ -66,6 +66,10 @@ type codexPayload struct {
 	TurnID string `json:"turn_id"`
 	Reason string `json:"reason"`
 
+	// task_complete: the error a turn ended with, when it failed. Kept raw,
+	// since other events may use the key differently.
+	Error json.RawMessage `json:"error"`
+
 	// thread_goal_updated
 	Goal *struct {
 		Objective string `json:"objective"`
@@ -167,6 +171,9 @@ func (p *CodexParser) Parse(line string, offset int64) []protocol.Message {
 	}
 	if rec.Payload.Type == "turn_aborted" {
 		return p.interrupted(rec, offset)
+	}
+	if rec.Payload.Type == "task_complete" {
+		return p.turnFailed(rec, offset)
 	}
 	if rec.Payload.Type == "thread_goal_updated" {
 		return p.goal(rec, offset)
@@ -804,6 +811,29 @@ func (p *CodexParser) interrupted(rec codexRecord, offset int64) []protocol.Mess
 		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem,
 		Ts: parseTime(rec.Timestamp), Text: "Interrupted",
 	}}
+}
+
+// turnFailed is the row for a turn that ended with an error, which Codex
+// records only on the turn's end: the plan's limit, a model at capacity, a
+// request refused. Without it the thread ends at the user's message, as if
+// Codex were still thinking.
+func (p *CodexParser) turnFailed(rec codexRecord, offset int64) []protocol.Message {
+	failed := codexEndError(rec.Payload)
+	if failed == nil {
+		return nil
+	}
+	id := "codex-failed:" + rec.Payload.TurnID
+	if rec.Payload.TurnID == "" {
+		id = fmt.Sprintf("o%d", offset)
+	}
+	message := protocol.Message{
+		ID: id, SessionID: p.sessionID, Role: protocol.RoleSystem,
+		Ts: parseTime(rec.Timestamp), Text: strings.TrimSpace(failed.Message), Notice: protocol.NoticeError,
+	}
+	if failed.Info == codexUsageLimit {
+		message.Text, message.Notice = codexLimitText(failed.Message), protocol.NoticeLimit
+	}
+	return []protocol.Message{message}
 }
 
 // codexEditSummary names the files of an edit, sorted: the one path, or how
