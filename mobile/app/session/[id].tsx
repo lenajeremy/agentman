@@ -889,7 +889,10 @@ export default function SessionScreen() {
         : "Model for this session";
 
   const displayState = effectiveState ?? session?.state ?? "ended";
-  const state = stateStyle(displayState, color);
+  // Idle because its plan ran out: the header says that, in the notice's red.
+  const state = displayState === "idle" && session?.limit
+    ? { ...stateStyle(displayState, color), label: "Out of usage", color: color.error, text: color.errorText }
+    : stateStyle(displayState, color);
   const folderPicture = useFolderIcon(sessionId, session?.cwd ?? "", session?.folderIcon);
   const chip = session
     ? statusChip(session.mode, session.contextPercent, modeChoices !== null)
