@@ -36,6 +36,11 @@ import (
 const antigravityLogTail = 256 << 10
 
 var (
+	// A turn refused for quota, as agy 1.4 logs it:
+	//	E1104 11:11:09.518965 2509 errorreport.go:247] generating and executing: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 4h25m49s.
+	antigravityLogQuota     = regexp.MustCompile(`^E\d{4} .*\] .*(?:RESOURCE_EXHAUSTED|exhausted your capacity|Out of credits)`)
+	antigravityLogTime      = regexp.MustCompile(`^[IWEF](\d{2})(\d{2}) (\d{2}):(\d{2}):(\d{2})`)
+	antigravityLogReset     = regexp.MustCompile(`Resets in ((?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?)`)
 	antigravityLogSurfaced  = regexp.MustCompile(`\] Surfacing (?:tool confirmation: "[^"]*"|ask_question) at step (\d+)\s*$`)
 	antigravityLogResponded = regexp.MustCompile(`\] Responding to tool confirmation: convID=([0-9a-f-]+), stepIdx=(\d+),`)
 	antigravityLogForwarded = regexp.MustCompile(`\] Forwarding user message to conversation ([0-9a-f-]+)\b`)
@@ -125,6 +130,10 @@ func antigravityLogState(text, conversation string, lastStep int) (protocol.Stat
 			match := antigravityLogForwarded.FindStringSubmatch(line)
 			active = match != nil && match[1] == conversation
 			cancelled, pending = false, -1
+		case active && antigravityLogQuota.MatchString(line):
+			// The model refused the turn: it is over, though the transcript
+			// still ends at the prompt.
+			cancelled, pending = true, -1
 		case strings.Contains(line, "] Cancelling in-progress response for conversation "):
 			if match := antigravityLogCancelled.FindStringSubmatch(line); match != nil && match[1] == conversation {
 				cancelled, pending = true, -1
@@ -150,4 +159,68 @@ func antigravityLogState(text, conversation string, lastStep int) (protocol.Stat
 		return protocol.StateIdle, true
 	}
 	return "", false
+}
+
+// antigravityLogLimit is the conversation's limit while the model's last
+// refusal of it was for quota and no message has gone to it since: what agy
+// said ("Individual quota reached"), when, and when it said the quota resets.
+// agy's transcript has no record of a refused turn; this log is the only one.
+func antigravityLogLimit(text, conversation string, now time.Time) *protocol.Limit {
+	active := false
+	var limit *protocol.Limit
+	for _, line := range strings.Split(text, "\n") {
+		switch {
+		case strings.Contains(line, "] Forwarding user message to conversation "):
+			match := antigravityLogForwarded.FindStringSubmatch(line)
+			active = match != nil && match[1] == conversation
+			if active {
+				limit = nil
+			}
+		case active && antigravityLogQuota.MatchString(line):
+			limit = antigravityQuotaLimit(line, now)
+		}
+	}
+	return limit
+}
+
+func antigravityQuotaLimit(line string, now time.Time) *protocol.Limit {
+	limit := &protocol.Limit{Text: "Out of quota for this model"}
+	if strings.Contains(line, "Out of credits") {
+		limit.Text = "Out of credits"
+	} else if _, after, found := strings.Cut(line, "RESOURCE_EXHAUSTED"); found {
+		// "(code 429): Individual quota reached. Please upgrade …"
+		if _, words, ok := strings.Cut(after, "): "); ok {
+			if sentence, _, _ := strings.Cut(words, ". "); strings.TrimSpace(sentence) != "" {
+				limit.Text = strings.TrimSuffix(strings.TrimSpace(sentence), ".")
+			}
+		}
+	}
+	// glog's time is the Mac's, with no year: the latest such moment by now.
+	if m := antigravityLogTime.FindStringSubmatch(line); m != nil {
+		month, _ := strconv.Atoi(m[1])
+		day, _ := strconv.Atoi(m[2])
+		hour, _ := strconv.Atoi(m[3])
+		minute, _ := strconv.Atoi(m[4])
+		second, _ := strconv.Atoi(m[5])
+		at := time.Date(now.Year(), time.Month(month), day, hour, minute, second, 0, now.Location())
+		if at.After(now.Add(24 * time.Hour)) {
+			at = at.AddDate(-1, 0, 0)
+		}
+		limit.At = at.UnixMilli()
+		if r := antigravityLogReset.FindStringSubmatch(line); r != nil && r[1] != "" {
+			if wait, err := time.ParseDuration(r[1]); err == nil {
+				limit.ResetsAt = at.Add(wait).UnixMilli()
+			}
+		}
+	}
+	return limit
+}
+
+// logLimit is the conversation's limit as its process's log says it.
+func (s *AntigravitySource) logLimit(path, conversation string) *protocol.Limit {
+	text, ok := s.logTail(path)
+	if !ok {
+		return nil
+	}
+	return antigravityLogLimit(text, conversation, time.Now())
 }

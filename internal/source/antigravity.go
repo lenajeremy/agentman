@@ -152,6 +152,10 @@ type antigravitySession struct {
 	// footer is what the pane's bottom row said on the last sweep: the mode
 	// agy is in, and how many subagents and background tasks it is running.
 	footer antigravityFooter
+	// refused is the model's last refusal of the conversation for quota,
+	// from the process's log, while no message has gone to it since; kept
+	// past its reset so the thread still says how the turn ended.
+	refused *protocol.Limit
 }
 
 // antigravityProcess is what lsof shows one agy process holding.
@@ -291,6 +295,12 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 				session.State = state
 			}
 		}
+		// Refused for quota: agy writes it only to the process's log.
+		var refused *protocol.Limit
+		if process.log != "" && session.State == protocol.StateIdle {
+			refused = s.logLimit(process.log, conversation)
+			session.Limit = parser.LimitCurrent(refused, time.Now())
+		}
 		s.offerSwitches(&session, footer)
 		if percent, ok := s.contextPercent(transcript, session.Model); ok {
 			session.ContextPercent = percent
@@ -304,7 +314,7 @@ func (s *AntigravitySource) Discover(ctx context.Context) ([]protocol.Session, e
 			}
 		}
 		found = append(found, session)
-		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName, footer: footer}
+		next[id] = antigravitySession{meta: session, transcript: transcript, tmuxName: tmuxName, footer: footer, refused: refused}
 	}
 
 	// A pane with no conversation yet: agy at its folder trust prompt, or
@@ -925,7 +935,26 @@ func (s *AntigravitySource) Page(ctx context.Context, sessionID, before string, 
 	if result.HasMore {
 		cursor = strconv.FormatInt(result.NextCursor, 10)
 	}
-	return protocol.NewPage(sessionID, result.Messages, cursor, result.HasMore), nil
+	messages := result.Messages
+	if notice, ok := antigravityRefusal(sessionID, session); ok && before == "" {
+		if n := len(messages); n > 0 && messages[n-1].Ts >= notice.Ts {
+			notice.Ts = messages[n-1].Ts + 1
+		}
+		messages = append(messages, notice)
+	}
+	return protocol.NewPage(sessionID, messages, cursor, result.HasMore), nil
+}
+
+// antigravityRefusal is the row for a turn the model refused for quota,
+// which the transcript has no record of.
+func antigravityRefusal(sessionID string, session antigravitySession) (protocol.Message, bool) {
+	if session.refused == nil {
+		return protocol.Message{}, false
+	}
+	return protocol.Message{
+		ID: fmt.Sprintf("agy-refused:%d", session.refused.At), SessionID: sessionID,
+		Role: protocol.RoleSystem, Ts: session.refused.At, Text: session.refused.Text, Notice: protocol.NoticeLimit,
+	}, true
 }
 
 // antigravityQuiet is how long agy must have been idle, with nothing new in
@@ -993,6 +1022,12 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 	// out under. Kept so an unchanged preview is not re-sent every tick, and so
 	// a preview no record replaces can be taken back.
 	var preview, previewID string
+	// The quota refusal last sent, so each is sent once; see
+	// antigravityRefusal.
+	sentRefusal := ""
+	if notice, ok := antigravityRefusal(sessionID, session); ok {
+		sentRefusal = notice.ID
+	}
 
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
@@ -1060,6 +1095,11 @@ func (s *AntigravitySource) Follow(ctx context.Context, sessionID string, out ch
 			// preview, so the live feed should not keep it either.
 			batch = append(batch, withdrawnPreview(sessionID, previewID))
 			preview, previewID = "", ""
+		}
+
+		if notice, ok := antigravityRefusal(sessionID, current); ok && notice.ID != sentRefusal {
+			sentRefusal = notice.ID
+			batch = append(batch, notice)
 		}
 
 		if len(batch) == 0 {
