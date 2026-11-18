@@ -36,7 +36,7 @@ const codexUsageLimit = "usage_limit_exceeded"
 // line is the refusal itself.
 func ClaudeLimitLine(line string) (limit *protocol.Limit, decides bool) {
 	// Most lines are neither; skip decoding them.
-	if !strings.Contains(line, `"type":"assistant"`) && !strings.Contains(line, `"type":"user"`) {
+	if !strings.Contains(line, `"assistant"`) && !strings.Contains(line, `"user"`) {
 		return nil, false
 	}
 	var rec claudeRecord

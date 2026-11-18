@@ -213,3 +213,12 @@ func TestLimitCurrentEndsAtTheReset(t *testing.T) {
 		t.Error("a limit with no reset time ended by itself")
 	}
 }
+
+// However the JSON is spaced.
+func TestClaudeLimitLineReadsSpacedJSON(t *testing.T) {
+	line := `{"type": "assistant", "isApiErrorMessage": true, "error": "rate_limit", ` +
+		`"message": {"content": [{"type": "text", "text": "You've hit your session limit"}]}}`
+	if limit, decides := ClaudeLimitLine(line); limit == nil || !decides {
+		t.Fatalf("got %v, %v", limit, decides)
+	}
+}
