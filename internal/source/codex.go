@@ -168,6 +168,8 @@ func anyCodexPane(panes []tmux.Session) bool {
 // CodexSource observes Codex rollout transcripts.
 type CodexSource struct {
 	home string
+	// limits follows whether each session is out of usage; see limits.go.
+	limits limitWatch
 	// held follows messages the phone sent into a running turn until the
 	// rollout shows Codex read them.
 	held *heldSends
@@ -704,6 +706,8 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 				}
 			}
 
+			session.Limit = s.limits.limit(ctx, id, path, session.State, parser.CodexLimitLine)
+
 			found = append(found, session)
 			next[id] = codexSession{meta: session, transcript: path, tmuxName: tmuxName}
 		}
@@ -774,6 +778,7 @@ func (s *CodexSource) Discover(ctx context.Context) ([]protocol.Session, error) 
 	}
 	s.models.forget(live)
 	s.held.forget(live)
+	s.limits.forget(live)
 	s.forgetCodexRollouts(liveRollouts)
 	s.asks.forget(liveRollouts)
 

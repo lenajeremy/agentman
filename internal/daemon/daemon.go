@@ -1481,6 +1481,8 @@ const (
 	// A mode is a word or two from a footer. The app accepts 256 characters,
 	// so this is well inside it in any script.
 	maxWireModeBytes = 64
+	// A limit's line is one sentence from the agent, about 80 bytes.
+	maxWireLimitBytes = 240
 	// The app accepts counts up to 100,000; nobody reviews more than this.
 	maxWireArtifactCount = 10_000
 )
@@ -1826,6 +1828,15 @@ func normalizeSessionStatus(session *protocol.Session) {
 		session.Mode = ""
 	}
 	session.ContextPercent = min(max(session.ContextPercent, 0), 100)
+	if session.Limit != nil {
+		limit := *session.Limit
+		limit.Text = truncateUTF8(strings.TrimSpace(limit.Text), maxWireLimitBytes, "")
+		if limit.Text == "" || containsTerminalControl(limit.Text) {
+			limit.Text = "Out of usage"
+		}
+		limit.ResetsAt, limit.At = max(limit.ResetsAt, 0), max(limit.At, 0)
+		session.Limit = &limit
+	}
 	session.Artifacts = min(max(session.Artifacts, 0), maxWireArtifactCount)
 	session.ArtifactsToReview = min(max(session.ArtifactsToReview, 0), session.Artifacts)
 	session.Modes = switchList(session.Modes, maxWireModes, maxWireModeBytes)

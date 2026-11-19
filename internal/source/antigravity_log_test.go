@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lenajeremy/agentman/internal/protocol"
 )
@@ -104,5 +105,42 @@ func TestParseAntigravityOpenFilesFindsTheLog(t *testing.T) {
 	if got.log != "/Users/me/.gemini/antigravity-cli/log/cli-20261005_102942.log" ||
 		len(got.conversations) != 1 || got.cwd != "/Users/me/work" {
 		t.Errorf("process = %+v", got)
+	}
+}
+
+// agy refuses a turn for quota only in its log, as it did on this Mac on
+// 2026-11-04; the transcript still ends at the prompt.
+const agyQuotaLog = `I1104 10:36:58.529131    2508 conversation_manager.go:874] Forwarding user message to conversation 060fd15f-936b-4f82-ade4-f8e2fb2b4f78 (items=1, media=0)
+E1104 11:11:09.518965    2509 errorreport.go:247] agent executor error: generating and executing: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 4h25m49s.
+E1104 11:11:09.521864    2509 errorreport.go:247] generating and executing: RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 4h25m49s.
+I1104 11:11:09.521928     215 quota_manager.go:45] doRefreshQuota: starting reload (force=false)
+`
+
+func TestAntigravityLogSaysWhenOutOfQuota(t *testing.T) {
+	conversation := "060fd15f-936b-4f82-ade4-f8e2fb2b4f78"
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.Local)
+	limit := antigravityLogLimit(agyQuotaLog, conversation, now)
+	at := time.Date(2026, 11, 4, 11, 11, 9, 0, time.Local)
+	if limit == nil || limit.Text != "Individual quota reached" || limit.At != at.UnixMilli() ||
+		limit.ResetsAt != at.Add(4*time.Hour+25*time.Minute+49*time.Second).UnixMilli() {
+		t.Fatalf("limit %+v", limit)
+	}
+	// The refused turn is over, though the transcript ends at the prompt.
+	if state, ok := antigravityLogState(agyQuotaLog, conversation, 0); !ok || state != protocol.StateIdle {
+		t.Fatalf("state %q %v", state, ok)
+	}
+	// Another conversation's refusal is not this one's.
+	if limit := antigravityLogLimit(agyQuotaLog, "aaaaaaaa-0000-0000-0000-000000000000", now); limit != nil {
+		t.Fatalf("another conversation: %+v", limit)
+	}
+	// A new message is a new turn.
+	again := agyQuotaLog + "I1104 12:22:58.140736  101367 conversation_manager.go:874] Forwarding user message to conversation " + conversation + " (items=1, media=0)\n"
+	if limit := antigravityLogLimit(again, conversation, now); limit != nil {
+		t.Fatalf("after a new message: %+v", limit)
+	}
+	// Last year's date, read in January.
+	if limit := antigravityLogLimit(agyQuotaLog, conversation, time.Date(2027, 1, 2, 9, 0, 0, 0, time.Local)); limit == nil ||
+		time.UnixMilli(limit.At).Year() != 2026 {
+		t.Fatalf("across the year: %+v", limit)
 	}
 }

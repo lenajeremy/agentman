@@ -68,6 +68,9 @@ extension EnvironmentValues {
     @Entry var threadFolder: String?
     /// The skills the conversation's agent has, which its messages name.
     @Entry var threadSkills: [SlashCommand] = []
+    /// The usage-limit notice that still holds: the newest one, while the
+    /// agent is out of usage. Any other is history, said quietly.
+    @Entry var liveLimitNotice: String?
 }
 
 /// Pictures made as small as where they show, decoded off the main thread

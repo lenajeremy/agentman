@@ -9,6 +9,7 @@ import { folderLabel, since } from "../labels";
 import { AgentMark, Spacer } from "../ui";
 import { Loader } from "./Loader";
 import { filterState } from "./sections";
+import { outOfUsageLabel } from "@shared/out-of-usage";
 import "../styles/agentrow.css";
 
 /** A session as am serve sends it to this app: with the agent's own name for
@@ -22,10 +23,12 @@ export function AgentRow({ session, branch, archived = false, title }: { session
   const folder = folderLabel(session.cwd);
   const detail = session.question?.title || session.question?.prompt || "Waiting for your answer";
   const own = ownName(session);
+  // Stopped until its plan resets; when it's back is what the line says.
+  const limit = !waiting && session.state !== "busy" && session.state !== "ended" ? session.limit : undefined;
   return (
     <>
       <span className="agent-line1">
-        <StateDot state={waiting ? "needs" : session.state === "busy" ? "working" : "idle"} />
+        <StateDot state={waiting ? "needs" : session.state === "busy" ? "working" : limit ? "out" : "idle"} />
         {title ?? (
           <span className={`agent-name ${session.state === "ended" || archived ? "ended" : ""}`} title={own ? `Renamed from “${own}”` : session.name}>
             {session.name || session.kind}
@@ -42,6 +45,8 @@ export function AgentRow({ session, branch, archived = false, title }: { session
         <AgentMark kind={session.kind} size={12} muted={archived} />
         {waiting ? (
           <span className="agent-place needs">{folder} · {detail}</span>
+        ) : limit ? (
+          <span className="agent-place out" title={limit.text}>{outOfUsageLabel(limit)}</span>
         ) : (
           <span className="agent-place">
             {folder}
@@ -57,10 +62,10 @@ export function AgentRow({ session, branch, archived = false, title }: { session
 /** An agent's state, before its title, in the same colours everywhere
  *  (StateDot): orange when it needs you, the loader turning while it works,
  *  a grey ring while it waits for something to do. */
-export function StateDot({ state }: { state: "needs" | "working" | "idle" }) {
+export function StateDot({ state }: { state: "needs" | "working" | "idle" | "out" }) {
   return (
-    <span className="state-dot" aria-label={state === "needs" ? "Needs you" : undefined}>
-      {state === "working" ? <Loader size={9} /> : <span className={state === "needs" ? "dot-needs" : "dot-idle"} />}
+    <span className="state-dot" aria-label={state === "needs" ? "Needs you" : state === "out" ? "Out of usage" : undefined}>
+      {state === "working" ? <Loader size={9} /> : <span className={state === "needs" ? "dot-needs" : state === "out" ? "dot-out" : "dot-idle"} />}
     </span>
   );
 }

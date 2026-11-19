@@ -58,16 +58,16 @@ func (p *CursorParser) Parse(line string, offset int64) []protocol.Message {
 	// Turn boundaries carry no display content on success. A failed turn
 	// would otherwise look like the agent silently did nothing.
 	if rec.Role == "" {
-		if rec.Type != "turn_ended" || rec.Status == "success" {
+		if rec.Type != "turn_ended" {
 			return nil
 		}
-		text := "Cursor turn failed"
-		if rec.Error != "" {
-			text += ": " + rec.Error
+		text, notice, ok := CursorTurnNotice(rec.Status, rec.Error)
+		if !ok {
+			return nil
 		}
 		return []protocol.Message{{
 			ID: fmt.Sprintf("o%d:error", offset), SessionID: p.sessionID,
-			Role: protocol.RoleSystem, Text: clip(text, PreviewChars),
+			Role: protocol.RoleSystem, Text: clip(text, PreviewChars), Notice: notice,
 		}}
 	}
 

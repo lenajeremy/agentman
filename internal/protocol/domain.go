@@ -157,6 +157,11 @@ type Session struct {
 	// favicon, logo.png or icon.png — relative to Cwd, for the apps to show
 	// in place of the folder's initials. Empty when the folder has none.
 	FolderIcon string `json:"folderIcon,omitempty"`
+	// Limit is set while the agent is out of usage: its last turn ended at
+	// its plan's limit, no turn has started since, and the time the plan
+	// said it resets, when it said one, has not come. The apps mark the
+	// agent so a quiet thread isn't taken for one still thinking.
+	Limit *Limit `json:"limit,omitempty"`
 
 	// AgentPID is the agent's own process, when the adapter knows it. It
 	// never leaves the machine: it is only how the daemon tells which
@@ -261,7 +266,28 @@ func (s Session) SameAs(other Session) bool {
 		s.Question.sameAs(other.Question) && SameServers(s.Servers, other.Servers) &&
 		slices.Equal(s.Queued, other.Queued) && slices.Equal(s.QueuedMessageIDs, other.QueuedMessageIDs) &&
 		s.CanSendQueued == other.CanSendQueued && s.Previous == other.Previous &&
-		s.Handoff == other.Handoff && s.FolderIcon == other.FolderIcon
+		s.Handoff == other.Handoff && s.FolderIcon == other.FolderIcon &&
+		s.Limit.sameAs(other.Limit)
+}
+
+// Limit is an agent's plan running out: what the agent said, and when it
+// said its usage comes back.
+type Limit struct {
+	// Text is the agent's own line for it, tidied to one sentence:
+	// "You've hit your session limit · resets 5:20pm (Europe/Dublin)".
+	Text string `json:"text"`
+	// ResetsAt is when the agent said the limit resets, in Unix
+	// milliseconds; 0 when it didn't say or the time couldn't be read.
+	ResetsAt int64 `json:"resetsAt,omitempty"`
+	// At is when the agent hit it, in Unix milliseconds.
+	At int64 `json:"at"`
+}
+
+func (l *Limit) sameAs(other *Limit) bool {
+	if l == nil || other == nil {
+		return l == other
+	}
+	return *l == *other
 }
 
 // SameServers reports whether two server lists are identical, in order.
@@ -408,7 +434,19 @@ type Message struct {
 	// IsSidechain marks subagent output, collapsed behind a chip in the UI
 	// rather than inlined with the main conversation.
 	IsSidechain bool `json:"isSidechain,omitempty"`
+	// Notice says what a system row is about, for the apps to style it:
+	// NoticeLimit for a turn that ended at the plan's usage limit,
+	// NoticeError for one that ended with any other error. Empty for every
+	// other row; an app that doesn't know a notice shows its Text as a
+	// plain system row.
+	Notice string `json:"notice,omitempty"`
 }
+
+// Notices; see Message.Notice.
+const (
+	NoticeLimit = "limit"
+	NoticeError = "error"
+)
 
 // Page is one screenful of scrollback.
 //

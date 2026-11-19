@@ -33,6 +33,8 @@ import { FindContext, Marked } from "../../components/FindMarks";
 import { markWords, searchable } from "../../lib/search";
 import type { SearchHit } from "../../lib/protocol";
 import { NoticeRow } from "../../components/NoticeRow";
+import { TurnNotice } from "../../components/TurnNotice";
+import { liveLimitNotice } from "../../lib/out-of-usage";
 import { SentImages } from "../../components/SentImages";
 import { SentFileChips } from "../../components/SentFileChips";
 import { ToolGroup } from "../../components/ToolGroup";
@@ -214,6 +216,9 @@ export default function SessionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [successor]);
   const messages = store.messages[sessionId] ?? [];
+  // The limit notice still in force; one from a limit that has passed reads
+  // as a quiet line instead of a red card.
+  const liveLimit = liveLimitNotice(messages, session?.limit);
   const paging = store.pageState[sessionId];
   const answerAction = store.actions.find(
     (action) => action.sessionId === sessionId && action.kind === "answer",
@@ -888,7 +893,10 @@ export default function SessionScreen() {
         : "Model for this session";
 
   const displayState = effectiveState ?? session?.state ?? "ended";
-  const state = stateStyle(displayState, color);
+  // Idle because its plan ran out: the header says that, in the notice's red.
+  const state = displayState === "idle" && session?.limit
+    ? { ...stateStyle(displayState, color), label: "Out of usage", color: color.error, text: color.errorText }
+    : stateStyle(displayState, color);
   const folderPicture = useFolderIcon(sessionId, session?.cwd ?? "", session?.folderIcon);
   const chip = session
     ? statusChip(session.mode, session.contextPercent, modeChoices !== null)
@@ -1357,6 +1365,7 @@ export default function SessionScreen() {
                 <MessageRow
                   message={item.message}
                   cwd={session?.cwd ?? ""}
+                  liveLimit={item.message.id === liveLimit}
                   fresh={
                     settled.current !== null &&
                     !settled.current.has(item.message.id)
@@ -2081,11 +2090,14 @@ function DeliveryNote({
 function MessageRow({
   message,
   cwd,
+  liveLimit,
   fresh,
   onCopied,
 }: {
   message: Message;
   cwd: string;
+  /** This is the usage-limit notice still in force. */
+  liveLimit: boolean;
   fresh: boolean;
   onCopied(): void;
 }) {
@@ -2115,6 +2127,20 @@ function MessageRow({
   }
 
   if (message.role === "system") {
+    if (message.notice === "limit" && !liveLimit) {
+      return (
+        <Appear enabled={fresh}>
+          <NoticeRow text="Hit its usage limit" />
+        </Appear>
+      );
+    }
+    if (message.notice === "limit" || message.notice === "error") {
+      return (
+        <Appear enabled={fresh}>
+          <TurnNotice text={message.text ?? ""} limit={message.notice === "limit"} />
+        </Appear>
+      );
+    }
     return (
       <Appear enabled={fresh}>
         <NoticeRow text={message.text ?? ""} />

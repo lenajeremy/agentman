@@ -341,6 +341,10 @@ func (s *CursorACPSource) Discover(ctx context.Context) ([]protocol.Session, err
 			state = protocol.StateWaitingInput
 		}
 		q := st.question
+		var limit *protocol.Limit
+		if state == protocol.StateIdle {
+			limit = parser.LimitFromRows(r.Messages)
+		}
 		// The ACP child runs only for the length of a turn; while it does,
 		// its pid is the one whose listening ports belong to this chat.
 		pid := 0
@@ -349,7 +353,7 @@ func (s *CursorACPSource) Discover(ctx context.Context) ([]protocol.Session, err
 		}
 		st.mu.Unlock()
 		if state == protocol.StateIdle && s.busyElsewhere(r.NativeID) {
-			state = protocol.StateBusy
+			state, limit = protocol.StateBusy, nil
 		}
 		if r.LastActivityAt < time.Now().Add(-cursorCLIWindow).UnixMilli() && state == protocol.StateIdle {
 			continue
@@ -361,7 +365,7 @@ func (s *CursorACPSource) Discover(ctx context.Context) ([]protocol.Session, err
 			State: state, Inject: protocol.InjectAPI, Question: q,
 			StartedAt: r.StartedAt, LastActivityAt: r.LastActivityAt,
 			Model: s.model(ctx, r.NativeID, r.LastActivityAt), AgentPID: pid,
-			Mode: r.Mode,
+			Mode: r.Mode, Limit: limit,
 		})
 	}
 	s.modelMu.Lock()
@@ -677,9 +681,10 @@ func (s *CursorACPSource) begin(st *cursorACPState, client *cursorACPClient, loc
 		st.mu.Lock()
 		if err != nil {
 			st.messageSeq++
+			text, notice := parser.FailureNotice("Cursor", err.Error())
 			st.record.Messages = append(st.record.Messages, protocol.Message{
 				ID: fmt.Sprintf("%s:%d:error", id, st.messageSeq), SessionID: id,
-				Role: protocol.RoleSystem, Ts: time.Now().UnixMilli(), Text: "Cursor stopped: " + err.Error(),
+				Role: protocol.RoleSystem, Ts: time.Now().UnixMilli(), Text: text, Notice: notice,
 			})
 			st.signalLocked()
 		}

@@ -156,6 +156,12 @@ type claudeRecord struct {
 	// ToolUseResult is what a tool returned, as Claude Code keeps it beside
 	// what it told the model. Kept raw: it is a string when the tool failed.
 	ToolUseResult json.RawMessage `json:"toolUseResult"`
+	// IsAPIErrorMessage marks a reply Claude Code wrote itself because the
+	// API refused the turn, and Error is the kind of refusal ("rate_limit"
+	// when the plan has run out). Error is kept raw: other records may use
+	// the key for something else.
+	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
+	Error             json.RawMessage `json:"error"`
 }
 
 // claudeFileChange is the part of an Edit's or a Write's result that says
@@ -301,6 +307,24 @@ func (p *ClaudeParser) Parse(line string, offset int64) []protocol.Message {
 	}
 	ts := parseTime(rec.Timestamp)
 	role := protocol.Role(rec.Type)
+
+	// A turn the API refused ends with Claude Code's own line saying why. It
+	// is not the agent talking, so it is a notice: the plan's limit, or
+	// another error.
+	if role == protocol.RoleAssistant && claudeAPIError(rec) != "" {
+		text := claudeRecordText(rec)
+		if text == "" {
+			return nil
+		}
+		notice := protocol.NoticeError
+		if claudeHitLimit(rec) {
+			notice = protocol.NoticeLimit
+		}
+		return []protocol.Message{{
+			ID: uuid, SessionID: p.sessionID, Role: protocol.RoleSystem, Ts: ts,
+			Text: text, Notice: notice, IsSidechain: rec.IsSidechain,
+		}}
+	}
 
 	// A bare string is a straight typed prompt.
 	var plain string

@@ -31,6 +31,8 @@ const maxClaudeRegistryBytes = 1 << 20
 // None of this is a published API. Everything that touches the layout is in
 // this file so a CLI upgrade breaks in one place.
 type ClaudeSource struct {
+	// limits follows whether each session is out of usage; see limits.go.
+	limits limitWatch
 	// models remembers each session's model so the transcript tail is not
 	// re-read on every one-second discovery sweep.
 	models *modelCache
@@ -303,6 +305,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 		working := meta.State == protocol.StateBusy || meta.State == protocol.StateWaitingInput
 		meta.Queued = s.queue.pending(id, transcript, working)
 		meta.CanSendQueued = tmuxName != "" && len(meta.Queued) > 0
+		meta.Limit = s.limits.limit(ctx, id, transcript, meta.State, parser.ClaudeLimitLine)
 
 		meta.Previous = s.previousOf(id, file.PID)
 		found = append(found, meta)
@@ -350,6 +353,7 @@ func (s *ClaudeSource) Discover(ctx context.Context) ([]protocol.Session, error)
 	}
 	s.models.forget(live)
 	s.queue.forget(live)
+	s.limits.forget(live)
 	s.forgetClaudeQuestionSpecs(live)
 
 	s.mu.Lock()

@@ -1141,6 +1141,9 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
     /// The folder's logo (its favicon, logo.png or icon.png), relative to
     /// cwd, shown in place of its initials. Absent when it has none.
     var folderIcon: String?
+    /// Set while the agent is out of usage: its last turn ended at its
+    /// plan's limit and the reset it named hasn't come.
+    var limit: AgentLimit?
 
     static func == (lhs: Session, rhs: Session) -> Bool {
         lhs.id == rhs.id && lhs.state == rhs.state && lhs.name == rhs.name &&
@@ -1149,7 +1152,7 @@ struct Session: Codable, Sendable, Identifiable, Hashable {
             lhs.modes == rhs.modes && lhs.models == rhs.models && lhs.originalName == rhs.originalName &&
             lhs.artifacts == rhs.artifacts && lhs.artifactsToReview == rhs.artifactsToReview &&
             lhs.servers == rhs.servers && lhs.folderIcon == rhs.folderIcon &&
-            lhs.inject == rhs.inject && lhs.handoff == rhs.handoff
+            lhs.inject == rhs.inject && lhs.handoff == rhs.handoff && lhs.limit == rhs.limit
     }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -1238,6 +1241,39 @@ enum Role: String, Codable, Sendable {
     case user, assistant, tool, system
 }
 
+/// An agent's plan running out: its own line for it, and when it said its
+/// usage comes back.
+struct AgentLimit: Codable, Sendable, Hashable {
+    /// "You've hit your session limit · resets 5:20pm (Europe/Dublin)".
+    var text: String
+    /// When it resets, in Unix milliseconds; absent when the agent didn't say.
+    var resetsAt: Int64?
+    var at: Int64
+
+    var resets: Date? {
+        guard let resetsAt, resetsAt > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(resetsAt) / 1000)
+    }
+
+    /// "Out of usage until 7:19 PM", or "until Thu 11 PM" when that is
+    /// another day; "Out of usage" when the agent named no time.
+    var label: String {
+        guard let resets else { return "Out of usage" }
+        return "Out of usage until " + Self.when(resets)
+    }
+
+    static func when(_ date: Date, now: Date = .now) -> String {
+        let calendar = Calendar.current
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(date, inSameDayAs: now) { return time }
+        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now),
+                                              to: calendar.startOfDay(for: date)).day, days < 7 {
+            return date.formatted(.dateTime.weekday(.abbreviated)) + " " + time
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day()) + " " + time
+    }
+}
+
 struct ToolCall: Codable, Sendable, Hashable {
     var name: String
     var summary: String?
@@ -1259,6 +1295,9 @@ struct Message: Codable, Sendable, Identifiable, Hashable {
     /// recorded it, never from its words.
     var images: [String]?
     var isSidechain: Bool?
+    /// What a system row is about: "limit" for a turn that ended at the
+    /// plan's usage limit, "error" for one that ended with another error.
+    var notice: String?
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(ts) / 1000) }
 }

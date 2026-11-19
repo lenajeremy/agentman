@@ -4,6 +4,7 @@
 // for the agent, and its question to answer. It follows the end while the
 // reader is there (FollowsEnd.swift) and loads what came before at the top.
 
+import { liveLimitNotice } from "@shared/out-of-usage";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@shared/protocol";
 import { agentName } from "./labels";
@@ -42,6 +43,9 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
 }) {
   const { messages, hasMore } = useStore();
   const list = useMemo(() => messages[session.id] ?? [], [messages, session.id]);
+  // The limit notice still in force; one from a limit that has passed is a
+  // quiet line, not a red card.
+  const liveLimit = liveLimitNotice(list, session.limit);
   const items = useMemo(() => threadItems(list), [list]);
   const gallery = useMemo(() => threadPictures(items), [items]);
   const localQueued = useQueued(session.id);
@@ -282,7 +286,7 @@ export function Thread({ session, stickToEnd, card = true, panel = false, findab
             {items.map((item) => (
               <div key={item.id} data-item={item.id} className="thread-item">
                 {item.kind === "message" ? (
-                  item.message.role === "tool" ? <ToolRun calls={[item.message]} /> : <MessageRow message={item.message} />
+                  item.message.role === "tool" ? <ToolRun calls={[item.message]} /> : <MessageRow message={item.message} liveLimit={item.message.id === liveLimit} />
                 ) : item.kind === "tools" ? (
                   <ToolRun calls={item.calls} said={item.said} />
                 ) : item.kind === "image" ? (
