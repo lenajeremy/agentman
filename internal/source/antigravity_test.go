@@ -337,6 +337,11 @@ func TestAntigravityFooterReadsModeModelAndCounts(t *testing.T) {
 		// A panel open over the prompt leaves the left side blank.
 		{"                                                                      plan · Gemini 3.8 Flash · high",
 			antigravityFooter{model: "Gemini 3.8 Flash", effort: "high", mode: "plan"}},
+		// agy 1.5.11 with Gemini 4: auto mode, xhigh effort.
+		{"? for shortcuts                                 auto · Gemini 4 Hydrogen · xhigh",
+			antigravityFooter{model: "Gemini 4 Hydrogen", effort: "xhigh", mode: "auto"}},
+		{"? for shortcuts                                           Gemini 4 Neon · minimal",
+			antigravityFooter{model: "Gemini 4 Neon", effort: "minimal"}},
 		{"Keyboard: ↑/↓ Navigate  ←/→ Switch View  esc Close", antigravityFooter{}},
 	} {
 		if got := parseAntigravityFooter([]string{"", tc.line, ""}); got != tc.want {

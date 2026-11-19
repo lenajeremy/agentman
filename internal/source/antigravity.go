@@ -492,8 +492,14 @@ func allBound(held map[int]antigravityProcess, pids []int) bool {
 
 var columnGap = regexp.MustCompile(`\s{2,}`)
 
+// antigravityEfforts are the reasoning efforts agy offers, as it prints them
+// after the model's name in its footer. Gemini 4 brought xhigh; a footer
+// whose effort is missing here is not read at all, which took every model
+// and mode switch away from the apps.
+const antigravityEfforts = `minimal|low|medium|high|xhigh|max`
+
 // antigravityEffort is the reasoning effort agy prints after the model name.
-var antigravityEffort = regexp.MustCompile(`^(?:low|medium|high|max)$`)
+var antigravityEffort = regexp.MustCompile(`(?i)^(?:` + antigravityEfforts + `)$`)
 
 // antigravityCount is a running count agy appends to its footer:
 // "1 subagent(s)", "2 task(s)".
@@ -542,7 +548,7 @@ func parseAntigravityFooter(lines []string) antigravityFooter {
 	if effort < 1 {
 		return footer
 	}
-	footer.effort = strings.TrimSpace(parts[effort])
+	footer.effort = strings.ToLower(strings.TrimSpace(parts[effort]))
 	footer.model = strings.TrimSpace(parts[effort-1])
 	if effort >= 2 {
 		footer.mode = strings.TrimSpace(parts[effort-2])
