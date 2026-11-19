@@ -346,6 +346,7 @@ struct AgentThreadView: View {
                     .frame(maxWidth: .infinity)
                     .environment(\.imageGallery, ThreadItem.pictures(in: items))
                     .environment(\.threadFolder, session.cwd)
+                    .modifier(FinderLinks(folder: session.cwd, applies: !inPanel))
                     .environment(\.threadSkills, slash?.skills ?? [])
                     .environment(\.findMarks, finding?.marks)
                 }

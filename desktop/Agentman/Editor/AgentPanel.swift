@@ -27,6 +27,7 @@ struct AgentPanel: View {
                     PanelAgentList(folder: editor.root.path) { editor.panelRoute = $0 }
                 case .agentman:
                     ManagerChatView(inPanel: true)
+                        .environment(\.openURL, OpenURLAction { [editor] in editor.followReplyLink($0, folder: nil) })
                         .onAppear { agents.showInPanel(nil) }
                         .onDisappear { agents.hideFromPanel(nil) }
                 case .agent(let id):
@@ -36,6 +37,7 @@ struct AgentPanel: View {
                     } else if let session = agents.session(id) {
                         AgentThreadView(session: session, inPanel: true, openChanges: { editor.showChanges(of: session.id) })
                             .equatable()
+                            .environment(\.openURL, OpenURLAction { [editor] in editor.followReplyLink($0, folder: session.cwd) })
                             .id(id)
                             .onAppear { agents.showInPanel(id) }
                             .onDisappear { agents.hideFromPanel(id) }
