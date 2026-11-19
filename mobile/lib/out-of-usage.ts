@@ -25,3 +25,19 @@ export function backAt(resetsAt: number, now: number = Date.now()): string {
 export function outOfUsageLabel(limit: LimitLike, now: number = Date.now()): string {
   return limit.resetsAt && limit.resetsAt > 0 ? `Out of usage until ${backAt(limit.resetsAt, now)}` : "Out of usage";
 }
+
+/** As much of a row as the rule below needs. */
+export interface NoticeLike {
+  id: string;
+  notice?: string;
+}
+
+/** The usage-limit notice that still holds: the newest, while the agent is
+ *  out of usage. Any other is history, and reads as a quiet line. */
+export function liveLimitNotice(messages: readonly NoticeLike[], limit: LimitLike | undefined): string | undefined {
+  if (!limit) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].notice === "limit") return messages[i].id;
+  }
+  return undefined;
+}

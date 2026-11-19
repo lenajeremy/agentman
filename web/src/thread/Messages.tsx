@@ -155,7 +155,7 @@ function AgentReply({ message }: { message: Message }) {
 }
 
 /** One entry in a conversation that isn't a tool call. */
-export function MessageRow({ message }: { message: Message }) {
+export function MessageRow({ message, liveLimit = false }: { message: Message; liveLimit?: boolean }) {
   switch (message.role) {
     case "user":
       if (isCompactionSummary(message.text ?? "")) return <FoldedText label="Summary of the earlier conversation" text={message.text ?? ""} />;
@@ -163,6 +163,10 @@ export function MessageRow({ message }: { message: Message }) {
     case "assistant":
       return <AgentReply message={message} />;
     case "system":
+      // A limit that has passed: a line in the thread, as a compaction is.
+      if (message.notice === "limit" && !liveLimit) {
+        return <div className="system" title={message.text ?? ""}>Hit its usage limit</div>;
+      }
       if (message.notice === "limit" || message.notice === "error") {
         // How the turn ended when it didn't end with a reply, said where the
         // reply would be.

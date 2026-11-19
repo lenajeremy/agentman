@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { backAt, outOfUsageLabel } from "./out-of-usage.ts";
+import { backAt, liveLimitNotice, outOfUsageLabel } from "./out-of-usage.ts";
 
 const at = (y: number, m: number, d: number, h: number, min = 0) => new Date(y, m - 1, d, h, min).getTime();
 const now = at(2026, 11, 18, 17, 6);
@@ -23,4 +23,11 @@ test("a reset in the week names its day, and a later one its date", () => {
 test("no reset time is out of usage with no time", () => {
   assert.equal(outOfUsageLabel({}, now), "Out of usage");
   assert.equal(outOfUsageLabel({ resetsAt: 0 }, now), "Out of usage");
+});
+
+test("only the newest limit notice holds, and only while the agent is out", () => {
+  const rows = [{ id: "a", notice: "limit" }, { id: "b" }, { id: "c", notice: "limit" }, { id: "d" }];
+  assert.equal(liveLimitNotice(rows, { resetsAt: 5 }), "c");
+  assert.equal(liveLimitNotice(rows, undefined), undefined);
+  assert.equal(liveLimitNotice([{ id: "b" }], {}), undefined);
 });

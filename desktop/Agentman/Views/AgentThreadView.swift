@@ -345,6 +345,7 @@ struct AgentThreadView: View {
                     .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
                     .environment(\.imageGallery, ThreadItem.pictures(in: items))
+                    .environment(\.liveLimitNotice, TurnNotice.live(in: store.messages[session.id] ?? [], limit: session.limit))
                     .environment(\.threadFolder, session.cwd)
                     .environment(\.threadSkills, slash?.skills ?? [])
                     .environment(\.findMarks, finding?.marks)
@@ -1178,6 +1179,7 @@ struct StateChip: View {
 struct MessageRow: View {
     let message: Message
     @Environment(\.findMarks) private var marks
+    @Environment(\.liveLimitNotice) private var liveLimit
 
     var body: some View {
         content.environment(\.findHighlight, highlight)
@@ -1229,7 +1231,14 @@ struct MessageRow: View {
         case .tool:
             ToolRun(calls: [message])
         case .system:
-            if let notice = message.notice, notice == "limit" || notice == "error" {
+            if message.notice == "limit", message.id != liveLimit {
+                // Over now: a line in the thread, as a compaction is.
+                Text("Hit its usage limit")
+                    .font(TextStyle.caption)
+                    .foregroundStyle(Palette.faint)
+                    .frame(maxWidth: .infinity)
+                    .help(message.text ?? "")
+            } else if let notice = message.notice, notice == "limit" || notice == "error" {
                 TurnNotice(text: message.text ?? "", limit: notice == "limit")
             } else {
                 Text(message.text ?? "")
@@ -1247,6 +1256,13 @@ struct MessageRow: View {
 struct TurnNotice: View {
     let text: String
     let limit: Bool
+
+    /// The limit notice that still holds: the newest, while the agent is
+    /// out of usage. Once the limit resets or a turn starts, none does.
+    static func live(in messages: [Message], limit: AgentLimit?) -> String? {
+        guard limit != nil else { return nil }
+        return messages.last(where: { $0.notice == "limit" })?.id
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {

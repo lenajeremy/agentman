@@ -222,4 +222,17 @@ final class ProtocolTests: XCTestCase {
                        thursday.formatted(.dateTime.weekday(.abbreviated)) + " " + thursday.formatted(date: .omitted, time: .shortened))
         XCTAssertEqual(AgentLimit(text: "x", resetsAt: nil, at: 1).label, "Out of usage")
     }
+
+    /// Only the newest limit notice holds, and only while the agent is out:
+    /// one from a limit that has passed is said quietly.
+    func testOnlyTheLiveLimitNoticeIsACard() {
+        func row(_ id: String, _ notice: String? = nil) -> Message {
+            Message(id: id, sessionId: "s", role: .system, ts: 1, text: "x", notice: notice)
+        }
+        let rows = [row("a", "limit"), row("b"), row("c", "limit"), row("d")]
+        let out = AgentLimit(text: "x", resetsAt: nil, at: 1)
+        XCTAssertEqual(TurnNotice.live(in: rows, limit: out), "c")
+        XCTAssertNil(TurnNotice.live(in: rows, limit: nil))
+        XCTAssertNil(TurnNotice.live(in: [row("b")], limit: out))
+    }
 }
