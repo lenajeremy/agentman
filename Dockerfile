@@ -8,7 +8,7 @@
 # Pin both the toolchain patch and the multi-platform image digest. A mutable
 # major-version tag can otherwise change the compiler and build environment
 # underneath an unchanged commit.
-FROM golang:1.27.3-alpine3.23@sha256:754d5200fc3edae76d3b6598a9a3fac7e74981ee6a5413ab955025f185753ef2 AS build
+FROM golang:1.27.4-alpine3.23@sha256:f70850ef6ce341e8b6427f677049145d63c0b7ce002d4d7e3d464828b1b96dcd AS build
 WORKDIR /src
 
 # Dependencies first, so a source-only change reuses the cached layer.
