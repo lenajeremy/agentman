@@ -14,6 +14,19 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.48.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.48.0</link>
+      <pubDate>Thu, 19 Nov 2026 08:45:47 GMT</pubDate>
+      <sparkle:version>57</sparkle:version>
+      <sparkle:shortVersionString>0.48.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.48.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[- **Out of usage, for every agent.** When Claude, Codex, Cursor, Kiro, OpenCode, Muse or Antigravity runs out of its plan, the thread says so where the reply would be, and the sidebar and Board say until when. Once the limit resets it fades to a quiet line.
+- **File links open.** A file an agent links to shows in Finder, or opens in the editor from its agent panel, at the line it names.
+- **Gemini 4 in Antigravity.** Its xhigh models and agy's auto mode can be switched to again.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.48.0/Agentman.dmg" length="46481972" type="application/octet-stream" sparkle:edSignature="b6DQ3kstIDcIZPB+2VSQdmhy6KVoXNxfeeZLDqak+ssgoJzTXpic51sX+71H2nIX1BWxAmUy28ONaPhEvyj2Cg=="/>
+    </item>
+    <item>
       <title>Agentman 0.47.1</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.47.1</link>
       <pubDate>Sun, 15 Nov 2026 09:23:52 GMT</pubDate>
