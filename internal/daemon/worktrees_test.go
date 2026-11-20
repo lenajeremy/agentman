@@ -39,7 +39,7 @@ func TestAWorktreeStartsFromTheCheckedOutBranch(t *testing.T) {
 	}
 	wt := *event.Worktree
 	want := filepath.Join(home, "Agentman", "Worktrees", "work", "rate-limits")
-	if wt.Path != want || wt.Name != "rate-limits" || wt.Repo != "work" || wt.Branch != "rate-limits" || !wt.Agentman {
+	if wt.LaunchPath != "Agentman/Worktrees/work/rate-limits" || wt.Path != want || wt.Name != "rate-limits" || wt.Repo != "work" || wt.Branch != "rate-limits" || !wt.Agentman {
 		t.Errorf("worktree = %+v, want it at %s", wt, want)
 	}
 	run := func(args ...string) string {

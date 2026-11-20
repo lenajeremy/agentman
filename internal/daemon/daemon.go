@@ -1236,6 +1236,9 @@ func (d *Daemon) HandleFrom(
 		if notify := req.Notify; notify != nil {
 			prefs = &push.Prefs{Finished: notify.Finished, NeedsYou: notify.NeedsYou,
 				Agentman: push.DefaultPrefs.Agentman, Agents: push.DefaultPrefs.Agents}
+			if len(notify.SourceID) == 16 {
+				prefs.SourceID = notify.SourceID
+			}
 			if notify.Agentman != nil {
 				prefs.Agentman = *notify.Agentman
 			}

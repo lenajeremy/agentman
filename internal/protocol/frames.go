@@ -495,7 +495,8 @@ type Event struct {
 
 // DaemonInfo describes the agentman running on this Mac.
 type DaemonInfo struct {
-	Version string `json:"version"`
+	DeviceName string `json:"deviceName,omitempty"`
+	Version    string `json:"version"`
 	// APILevel is the daemon's APILevel: what an app can rely on it for.
 	// Missing, and so 0, from a daemon older than the field.
 	APILevel int `json:"apiLevel,omitempty"`
@@ -533,6 +534,7 @@ type ReleaseNote struct {
 // WorkspaceResult is a bounded, read-only view of one session's directory.
 // Worktree is one of a repository's working folders.
 type Worktree struct {
+	LaunchPath string `json:"launchPath,omitempty"` // Home-relative path accepted by start_session.
 	// Path is the folder, absolute.
 	Path string `json:"path"`
 	// Name is the folder's name; Repo is the repository's own folder name.
@@ -732,6 +734,8 @@ func NewEnvelope(id string, to Peer, payload any) (Envelope, error) {
 
 // NotifyPrefs is which alerts one phone wants pushed to it.
 type NotifyPrefs struct {
+	// SourceID lets this phone route a push to its paired computer.
+	SourceID string `json:"sourceId,omitempty"`
 	// Finished: an agent finished its turn.
 	Finished bool `json:"finished"`
 	// NeedsYou: an agent is blocked on an approval or a question.

@@ -53,7 +53,8 @@ type Config struct {
 
 // Token is one registered device.
 type Token struct {
-	Value string `json:"value"`
+	SourceID string `json:"sourceId,omitempty"`
+	Value    string `json:"value"`
 	// LastSeen is refreshed whenever the app re-registers, which it does on
 	// every connect, so an active phone never expires.
 	LastSeen int64 `json:"lastSeen"`
@@ -84,6 +85,7 @@ const (
 
 // Prefs is one phone's choice of alerts.
 type Prefs struct {
+	SourceID string
 	Finished bool
 	NeedsYou bool
 	Agentman bool
@@ -164,7 +166,7 @@ func NewStore(dir string) *Store {
 			s.tokens[token.Value] = device{
 				lastSeen: token.LastSeen,
 				prefs: Prefs{
-					Finished: !token.MuteFinished, NeedsYou: !token.MuteNeedsYou,
+					SourceID: token.SourceID, Finished: !token.MuteFinished, NeedsYou: !token.MuteNeedsYou,
 					Agentman: !token.MuteAgentman, Agents: token.Agents,
 				},
 			}
@@ -275,7 +277,7 @@ func (s *Store) save() error {
 	stored := make([]Token, 0, len(s.tokens))
 	for token, device := range s.tokens {
 		stored = append(stored, Token{
-			Value:        token,
+			SourceID: device.prefs.SourceID, Value: token,
 			LastSeen:     device.lastSeen,
 			MuteFinished: !device.prefs.Finished,
 			MuteNeedsYou: !device.prefs.NeedsYou,
@@ -364,6 +366,12 @@ func (s *Sender) Send(ctx context.Context, alert Alert) error {
 		}
 		if alert.SessionID != "" || alert.Agentman {
 			message.Data = map[string]any{}
+			s.Store.mu.Lock()
+			sourceID := s.Store.tokens[token].prefs.SourceID
+			s.Store.mu.Unlock()
+			if sourceID != "" {
+				message.Data["deviceId"] = sourceID
+			}
 			if alert.SessionID != "" {
 				message.Data["sessionId"] = alert.SessionID
 			}

@@ -96,6 +96,7 @@ func TestAFinishedTurnReachesTheDeviceThroughExpo(t *testing.T) {
 	const token = "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
 	if event := agent.HandleFrom(ctx, "device-1", protocol.Request{
 		Type: protocol.ReqRegisterPush, PushToken: token,
+		Notify: &protocol.NotifyPrefs{Finished: true, SourceID: "0123456789abcdef"},
 	}); event.Type == protocol.EvtError {
 		t.Fatalf("registration refused: %s", event.Error)
 	}
@@ -116,6 +117,9 @@ func TestAFinishedTurnReachesTheDeviceThroughExpo(t *testing.T) {
 	}
 	// Tapping the alert has to open the right session.
 	data, _ := sent[0]["data"].(map[string]any)
+	if data["deviceId"] != "0123456789abcdef" {
+		t.Errorf("push source = %v", data["deviceId"])
+	}
 	if data["sessionId"] != "opencode:s1" {
 		t.Errorf("data.sessionId = %v, want the finished session", data["sessionId"])
 	}

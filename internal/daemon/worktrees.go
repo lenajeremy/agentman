@@ -129,7 +129,7 @@ func createWorktree(ctx context.Context, folder, name string) (*protocol.Worktre
 		return nil, err
 	}
 	return &protocol.Worktree{
-		Path: target, Name: filepath.Base(target), Repo: repo, Branch: branch, Agentman: true,
+		LaunchPath: worktreeLaunchPath(target), Path: target, Name: filepath.Base(target), Repo: repo, Branch: branch, Agentman: true,
 		Copied: copyEnvFiles(ctx, top, target),
 	}, nil
 }
@@ -211,6 +211,18 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
+func worktreeLaunchPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || validateLaunchPath(rel, false) != nil {
+		return ""
+	}
+	return rel
+}
+
 // listWorktrees lists a repository's worktrees, its own folder first.
 func listWorktrees(ctx context.Context, folder string) ([]protocol.Worktree, error) {
 	listed, _, err := runGit(ctx, folder, "worktree", "list", "--porcelain")
@@ -236,6 +248,7 @@ func listWorktrees(ctx context.Context, folder string) ([]protocol.Worktree, err
 		if worktree.Path == "" {
 			continue
 		}
+		worktree.LaunchPath = worktreeLaunchPath(worktree.Path)
 		worktree.Name = filepath.Base(worktree.Path)
 		worktree.Repo = repo
 		worktree.Main = len(list) == 0

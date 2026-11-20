@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -29,10 +30,12 @@ func installRoute() string {
 // API level and install route always, and what is newer once a check has
 // succeeded.
 func daemonInfo(checker *update.Checker, upgrade, install string) *protocol.DaemonInfo {
+	name, _ := os.Hostname()
 	info := &protocol.DaemonInfo{
-		Version:  strings.TrimPrefix(version, "v"),
-		APILevel: protocol.APILevel,
-		Install:  install,
+		DeviceName: name,
+		Version:    strings.TrimPrefix(version, "v"),
+		APILevel:   protocol.APILevel,
+		Install:    install,
 	}
 	status, checked := checker.Status()
 	if !checked {
