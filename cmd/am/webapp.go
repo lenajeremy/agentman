@@ -189,29 +189,37 @@ func (g *appGateway) watch(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return nil
 	}
-	if send(": watching\n\n") != nil {
-		return
-	}
-	// A comment now and then keeps the stream from looking idle.
-	go func() {
-		tick := time.NewTicker(25 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-r.Context().Done():
-				return
-			case <-tick.C:
-				_ = send(": still\n\n")
-			}
+	// Take the initial snapshot before announcing ": watching" so a file
+	// written right after the header arrives is always seen as created.
+	keepalive := make(chan struct{})
+	apphost.WatchReady(r.Context(), root, func() error {
+		if err := send(": watching\n\n"); err != nil {
+			return err
 		}
-	}()
-	apphost.Watch(r.Context(), root, func(changed apphost.FilesChanged) error {
+		// A comment now and then keeps the stream from looking idle.
+		go func() {
+			tick := time.NewTicker(25 * time.Second)
+			defer tick.Stop()
+			for {
+				select {
+				case <-r.Context().Done():
+					return
+				case <-keepalive:
+					return
+				case <-tick.C:
+					_ = send(": still\n\n")
+				}
+			}
+		}()
+		return nil
+	}, func(changed apphost.FilesChanged) error {
 		data, err := json.Marshal(changed)
 		if err != nil {
 			return err
 		}
 		return send("data: " + string(data) + "\n\n")
 	})
+	close(keepalive)
 }
 
 // webappHostOK keeps DNS rebinding out: the app answers only to loopback.

@@ -41,7 +41,18 @@ const (
 // editor tab's /app/watch stream), telling changed what changed every few
 // seconds. It stops when ctx ends or changed fails.
 func Watch(ctx context.Context, root string, changed func(FilesChanged) error) {
+	WatchReady(ctx, root, nil, changed)
+}
+
+// WatchReady is Watch, calling ready once the initial folder snapshot is taken
+// so callers that announce readiness cannot race with writes made right after.
+func WatchReady(ctx context.Context, root string, ready func() error, changed func(FilesChanged) error) {
 	before := scanFolder(root)
+	if ready != nil {
+		if err := ready(); err != nil {
+			return
+		}
+	}
 	tick := time.NewTicker(watchEvery)
 	defer tick.Stop()
 	for {
