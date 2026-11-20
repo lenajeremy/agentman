@@ -14,6 +14,19 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.49.0</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.49.0</link>
+      <pubDate>Fri, 20 Nov 2026 17:33:27 GMT</pubDate>
+      <sparkle:version>58</sparkle:version>
+      <sparkle:shortVersionString>0.49.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.49.0</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[- **Multi-device iPhone support:** Report this Mac's hostname to paired phones and tag push notifications with the device ID so tapping an alert opens the right computer.
+- **Worktrees from iPhone:** Include launch paths when listing or creating git worktrees so you can start sessions in an existing or new worktree from your phone.
+- **Editor folder watch:** Take the initial folder snapshot before announcing `/app/watch` ready so edits immediately after opening aren't missed.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.49.0/Agentman.dmg" length="46553628" type="application/octet-stream" sparkle:edSignature="Eh8lxMLaTIlOpp2Jp0UuJjtupbi2sm1uDM0fYF1QP8OnwC/jOeEzhpCSK4vI5boLz6jStlOGM1536V/iK38uDA=="/>
+    </item>
+    <item>
       <title>Agentman 0.48.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.48.0</link>
       <pubDate>Thu, 19 Nov 2026 08:45:47 GMT</pubDate>
