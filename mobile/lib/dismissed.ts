@@ -19,9 +19,9 @@ const KEY = "agentman.dismissed";
 
 export * from "./dismissRules";
 
-export async function loadDismissals(): Promise<Dismissals> {
+export async function loadDismissals(scope: string): Promise<Dismissals> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await AsyncStorage.getItem(KEY + "." + scope);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
@@ -40,9 +40,9 @@ export async function loadDismissals(): Promise<Dismissals> {
   }
 }
 
-export async function saveDismissals(dismissals: Dismissals): Promise<void> {
+export async function saveDismissals(dismissals: Dismissals, scope: string): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEY, JSON.stringify(dismissals));
+    await AsyncStorage.setItem(KEY + "." + scope, JSON.stringify(dismissals));
   } catch {
     // Losing a dismissal means a row you hid comes back, which is annoying but
     // not worth an error dialog over.

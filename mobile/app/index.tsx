@@ -2,7 +2,7 @@ import Feather from "@expo/vector-icons/Feather";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ComponentRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -24,17 +24,20 @@ import { ContentColumn } from "../components/ContentColumn";
 import { StickerOnDots, edged, eyebrow, hardShadow } from "../components/Brand";
 import { EmptyIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
+import { Popover, type PopoverItem } from "../components/Popover";
 import { Pulse } from "../components/Pulse";
 import { QuestionCard } from "../components/QuestionCard";
 import { ROW_GAP, SwipeToDismiss } from "../components/SwipeToDismiss";
 import { useStyles, useTheme } from "../lib/appearance";
 import { canDismiss } from "../lib/dismissed";
 import { emptyBoard, folderContains, folderLabel } from "../lib/folders";
-import { Session, type SearchHit, type SearchResults } from "../lib/protocol";
+import { Session, type SearchHit } from "../lib/protocol";
 import { markedSegments, markWords, searchable } from "../lib/search";
 import { outOfUsageLabel } from "../lib/out-of-usage";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
-import { useStore } from "../lib/store";
+import { draftNamespace } from "../lib/draft-policy";
+import { hostName, useFleet, type Host } from "../lib/fleet";
+import { useStore, type Store } from "../lib/store";
 import { useUpdates } from "../lib/updates-context";
 import {
   agentLabel,
@@ -52,11 +55,36 @@ import { folderName, modelLabel } from "../lib/session-view";
 /** The states a chip can narrow the list to. */
 type StateFilter = Session["state"];
 
+type NamedHost = { host: Host; name: string };
+type FleetSession = {
+  /** Composite key so duplicate session IDs on different computers never collide. */
+  key: string;
+  host: Host;
+  deviceName: string;
+  session: Session;
+};
+type FleetSearchHit = {
+  key: string;
+  host: Host;
+  deviceName: string;
+  hit: SearchHit;
+};
+type FleetSearchResults = {
+  query: string;
+  hits: FleetSearchHit[];
+  indexing: boolean;
+};
+
+function fleetSessionKey(hostId: string, sessionId: string): string {
+  return `${hostId}\0${sessionId}`;
+}
+
 /** Set once an update has been offered, until the app is next launched. */
 let promptedThisLaunch = false;
 
 export default function Agents() {
-  const store = useStore();
+  const fleet = useFleet();
+  const activeStore = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
@@ -66,15 +94,58 @@ export default function Agents() {
   // coarse enough to be free.
   useTicking(30_000);
   /** The row just swiped away, offered back for a few seconds. */
-  const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
-  /** What is typed in the search box, and what the Mac found for it. A link
-   *  to the list can carry a search to start with, as ?q=. */
+  const [undo, setUndo] = useState<{ key: string; hostId: string; id: string; name: string } | null>(null);
+  /** State chip selection while viewing all paired devices together. */
+  const [fleetStateFilter, setFleetStateFilter] = useState<StateFilter | null>(null);
+  /** What is typed in the search box, and what the paired Macs found for it. A
+   *  link to the list can carry a search to start with, as ?q=. */
   const { q } = useLocalSearchParams<{ q?: string }>();
   const [query, setQuery] = useState(typeof q === "string" ? q : "");
-  const [found, setFound] = useState<SearchResults | null>(null);
+  const [found, setFound] = useState<FleetSearchResults | null>(null);
   const [searchProblem, setSearchProblem] = useState<string | null>(null);
   const trimmed = query.trim();
   const searching = trimmed.length > 0;
+
+  const namedHosts = useMemo<NamedHost[]>(
+    () => fleet.hosts.map((host, index) => ({ host, name: hostName(host, index) })),
+    [fleet.hosts],
+  );
+  const multiDevice = namedHosts.length > 1;
+  const filteredHost = useMemo(
+    () => (fleet.filter ? namedHosts.find((entry) => entry.host.id === fleet.filter) ?? null : null),
+    [fleet.filter, namedHosts],
+  );
+  const shownHosts = useMemo(
+    () => (filteredHost ? [filteredHost] : namedHosts),
+    [filteredHost, namedHosts],
+  );
+  const showingAllDevices = multiDevice && !filteredHost;
+  const focusedHost = filteredHost ?? (namedHosts.length === 1 ? namedHosts[0] : null);
+  const focusedStore = focusedHost?.host.store ?? activeStore;
+  const activeStateFilter = showingAllDevices ? fleetStateFilter : focusedStore.stateFilter;
+  const setActiveStateFilter = useCallback(
+    (next: StateFilter | null) => {
+      if (showingAllDevices) setFleetStateFilter(next);
+      else focusedStore.setStateFilter(next);
+    },
+    [showingAllDevices, focusedStore],
+  );
+
+  const rows = useMemo<FleetSession[]>(
+    () =>
+      shownHosts.flatMap(({ host, name }) => {
+        const list = showingAllDevices ? host.store.liveSessions : host.store.visibleSessions;
+        return list.map((session) => ({
+          key: fleetSessionKey(host.id, session.id),
+          host,
+          deviceName: name,
+          session,
+        }));
+      }),
+    [shownHosts, showingAllDevices],
+  );
+
+  const shownIds = shownHosts.map(({ host }) => host.id).join("\0");
 
   // What was said, a moment after typing stops: over the relay a search per
   // key would queue up behind itself.
@@ -86,17 +157,54 @@ export default function Agents() {
     }
     let current = true;
     const timer = setTimeout(() => {
-      store.search(trimmed).then(
-        (results) => { if (current) setFound(results); },
-        (error: Error) => { if (current) setSearchProblem(error.message); },
-      );
+      const targets = shownHosts.filter(({ host }) => host.store.daemonOnline);
+      if (targets.length === 0) {
+        if (current) setFound({ query: trimmed, hits: [], indexing: false });
+        return;
+      }
+      void Promise.allSettled(
+        targets.map(async ({ host, name }) => ({
+          host,
+          deviceName: name,
+          results: await host.store.search(trimmed),
+        })),
+      ).then((settled) => {
+        if (!current) return;
+        const hits: FleetSearchHit[] = [];
+        let indexing = false;
+        let firstError: string | null = null;
+        let succeeded = 0;
+        for (const outcome of settled) {
+          if (outcome.status === "fulfilled") {
+            succeeded += 1;
+            if (outcome.value.results.indexing) indexing = true;
+            for (const hit of outcome.value.results.hits) {
+              if (!hit.session) continue;
+              hits.push({
+                key: fleetSessionKey(outcome.value.host.id, hit.session.id),
+                host: outcome.value.host,
+                deviceName: outcome.value.deviceName,
+                hit,
+              });
+            }
+          } else if (!firstError) {
+            firstError =
+              outcome.reason instanceof Error ? outcome.reason.message : "Search failed.";
+          }
+        }
+        if (succeeded === 0 && firstError) {
+          setSearchProblem(firstError);
+          return;
+        }
+        setFound({ query: trimmed, hits, indexing });
+      });
     }, 300);
     return () => {
       current = false;
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed]);
+  }, [trimmed, shownIds]);
   // Relative times ("3m") go stale while the screen sits open.
   const [, forceTick] = useState(0);
 
@@ -111,36 +219,61 @@ export default function Agents() {
     return () => clearTimeout(timer);
   }, [undo]);
 
+  const activeFolderFilter = showingAllDevices ? null : focusedStore.folderFilter;
+  const activeFolderRoot = showingAllDevices ? null : focusedStore.folderRoot;
+
   // Filtering happens here rather than in visibleSessions, so every chip
   // keeps showing its own count while another one is active. A chip whose
   // number vanished when you tapped its neighbour would be unreadable.
   const groups = useMemo(
-    () => groupByState(store.visibleSessions, color, store.stateFilter),
-    [store.visibleSessions, color, store.stateFilter],
+    () => groupByState(rows, color, activeStateFilter),
+    [rows, color, activeStateFilter],
   );
   const results = useMemo(
-    () => searching
-      ? searchSections(store.visibleSessions, trimmed, found, color,
-        store.folderFilter ? (cwd: string) => folderContains(store.folderFilter!, store.folderRoot, cwd) : null)
-      : null,
-    [searching, store.visibleSessions, trimmed, found, color, store.folderFilter, store.folderRoot],
+    () =>
+      searching
+        ? searchSections(
+            rows,
+            trimmed,
+            found,
+            color,
+            activeFolderFilter
+              ? (cwd: string) => folderContains(activeFolderFilter, activeFolderRoot, cwd)
+              : null,
+            showingAllDevices,
+          )
+        : null,
+    [searching, rows, trimmed, found, color, activeFolderFilter, activeFolderRoot, showingAllDevices],
   );
-  const hiddenCount = store.sessions.length - store.visibleSessions.length;
-  // Nothing has run on this Mac yet: the empty text says to tap +, so the +
-  // turns the site's orange until there is an agent.
+
+  const hiddenCount = shownHosts.reduce((sum, { host }) => {
+    const shown = showingAllDevices ? host.store.liveSessions.length : host.store.visibleSessions.length;
+    return sum + Math.max(0, host.store.sessions.length - shown);
+  }, 0);
+
+  const onlineCount = shownHosts.filter(({ host }) => host.store.daemonOnline).length;
+  const anyOnline = onlineCount > 0;
+  const anyIncompatible = shownHosts.some(({ host }) => host.store.connection === "incompatible");
+  const latestSeenAt = shownHosts.reduce<number | null>((latest, { host }) => {
+    const seen = host.store.lastSeenAt;
+    if (!seen) return latest;
+    return latest === null || seen > latest ? seen : latest;
+  }, null);
+
+  // Nothing has run on these machines yet: the empty text says to tap +, so the
+  // + turns the site's orange until there is an agent.
   const nothingRunning =
     color.look === "site" &&
-    store.visibleSessions.length === 0 &&
-    store.daemonOnline &&
-    !store.folderFilter &&
-    emptyBoard(store.folderFilter, hiddenCount) !== "hidden";
-  const incompatible = store.connection === "incompatible";
+    rows.length === 0 &&
+    anyOnline &&
+    !activeFolderFilter &&
+    emptyBoard(activeFolderFilter, hiddenCount) !== "hidden";
 
   // A newer app or Mac is offered here, on the board, once per version: never
   // over a session someone is reading, not before the board has drawn, and
   // not twice in one launch, so the two never arrive back to back.
   const { pending } = useUpdates();
-  const paired = Boolean(store.credentials);
+  const paired = namedHosts.length > 0 || Boolean(activeStore.credentials);
   useFocusEffect(
     useCallback(() => {
       if (!pending || !paired || promptedThisLaunch) return;
@@ -152,14 +285,14 @@ export default function Agents() {
     }, [pending, paired, router]),
   );
 
-  if (!store.ready) return <View style={styles.page} />;
-  if (!store.credentials) return <Redirect href="/pair" />;
+  if (!activeStore.ready) return <View style={styles.page} />;
+  if (namedHosts.length === 0 && !activeStore.credentials) return <Redirect href="/pair" />;
 
   // Three tiles, and ended sessions are in none of them. The board answers
   // "does anything need me?", and a finished session never does — counting a
   // folder's forty of them as Idle would drown the one agent that is.
-  const counts = store.visibleSessions.reduce(
-    (current, session) => {
+  const counts = rows.reduce(
+    (current, { session }) => {
       if (session.state === "ended") {
         current.ended += 1;
         return current;
@@ -172,6 +305,34 @@ export default function Agents() {
     { needsYou: 0, working: 0, idle: 0, ended: 0 },
   );
 
+  const connectionLabel = !multiDevice
+    ? anyOnline
+      ? "Mac connected"
+      : anyIncompatible
+        ? "Update required"
+        : "Reconnecting"
+    : filteredHost
+      ? filteredHost.host.store.daemonOnline
+        ? filteredHost.name
+        : filteredHost.host.store.connection === "incompatible"
+          ? "Update required"
+          : `${filteredHost.name} · Offline`
+      : onlineCount === shownHosts.length
+        ? `${onlineCount} devices online`
+        : onlineCount > 0
+          ? `${onlineCount} of ${shownHosts.length} online`
+          : anyIncompatible
+            ? "Update required"
+            : "Offline";
+
+  const offlineSubject = showingAllDevices
+    ? "Your devices are"
+    : filteredHost
+      ? `${filteredHost.name} is`
+      : "Your Mac is";
+
+  const managerHosts = shownHosts.filter(({ host }) => host.manager.supported);
+
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
       <SectionList
@@ -180,7 +341,7 @@ export default function Agents() {
           ...group,
           data: group.sessions,
         }))}
-        keyExtractor={(session) => session.id}
+        keyExtractor={(item) => item.key}
         stickySectionHeadersEnabled={false}
         initialNumToRender={12}
         windowSize={7}
@@ -193,7 +354,7 @@ export default function Agents() {
             tintColor={color.faint}
             onRefresh={() => {
               setRefreshing(true);
-              store.refresh();
+              for (const { host } of shownHosts) host.store.refresh();
               setTimeout(() => setRefreshing(false), 600);
             }}
           />
@@ -202,20 +363,40 @@ export default function Agents() {
           <ContentColumn style={styles.gutter}>
             <View style={styles.topBar}>
               <ConnectionChip
-                online={store.daemonOnline}
-                incompatible={incompatible}
+                label={connectionLabel}
+                online={anyOnline}
               />
               <View style={styles.topActions}>
-                <MotionPressable hitSlop={12}
-                  style={[styles.iconButton, nothingRunning && styles.iconButtonFlood]} pressedScale={0.94}
-                  onPress={() => router.push("/new-session")} accessibilityRole="button"
-                  accessibilityLabel="New session" disabled={!store.daemonOnline}>
-                  <Feather name="plus" size={22}
-                    color={nothingRunning ? color.edge : store.daemonOnline ? color.text : color.faint} />
+                <MotionPressable
+                  hitSlop={12}
+                  style={[styles.iconButton, nothingRunning && styles.iconButtonFlood]}
+                  pressedScale={0.94}
+                  onPress={() => {
+                    const target =
+                      filteredHost?.host ??
+                      shownHosts.find(({ host }) => host.id === fleet.active && host.store.daemonOnline)?.host ??
+                      shownHosts.find(({ host }) => host.store.daemonOnline)?.host;
+                    if (target) fleet.select(target.id);
+                    router.push("/new-session");
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="New session"
+                  disabled={!anyOnline}
+                >
+                  <Feather
+                    name="plus"
+                    size={22}
+                    color={nothingRunning ? color.edge : anyOnline ? color.text : color.faint}
+                  />
                 </MotionPressable>
-                <MotionPressable hitSlop={12} style={styles.iconButton} pressedScale={0.94}
-                  onPress={() => router.push("/settings")} accessibilityRole="button"
-                  accessibilityLabel="Settings">
+                <MotionPressable
+                  hitSlop={12}
+                  style={styles.iconButton}
+                  pressedScale={0.94}
+                  onPress={() => router.push("/settings")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Settings"
+                >
                   <Feather name="settings" size={19} color={color.text} />
                 </MotionPressable>
               </View>
@@ -236,14 +417,20 @@ export default function Agents() {
               />
             ) : (
             <>
-            <AgentmanCard />
+            {managerHosts.map(({ host, name }, idx) => (
+              <AgentmanCard
+                key={host.id}
+                host={host}
+                deviceName={showingAllDevices ? name : undefined}
+                stacked={idx < managerHosts.length - 1}
+                onSelect={() => fleet.select(host.id)}
+              />
+            ))}
 
-            {!store.daemonOnline ? (
-              incompatible ? (
-                <ProtocolBanner />
-              ) : (
-                <OfflineBanner lastSeenAt={store.lastSeenAt} />
-              )
+            {anyIncompatible ? (
+              <ProtocolBanner />
+            ) : !anyOnline ? (
+              <OfflineBanner lastSeenAt={latestSeenAt} subject={offlineSubject} />
             ) : null}
 
             {/* One row of filters where there were three count tiles and a
@@ -255,17 +442,27 @@ export default function Agents() {
                 keeps the glance — the numbers are still the first thing you
                 see — costs one row instead of three, and gives each number
                 something to do: tapping one narrows the list to that state. */}
-            <FilterBar counts={counts} ended={counts.ended} />
+            <FilterBar
+              counts={counts}
+              ended={counts.ended}
+              stateFilter={activeStateFilter}
+              setStateFilter={setActiveStateFilter}
+              namedHosts={namedHosts}
+              filteredHost={filteredHost}
+              anyOnline={anyOnline}
+            />
 
-            {store.visibleSessions.length === 0 &&
-              store.daemonOnline &&
-              (emptyBoard(store.folderFilter, hiddenCount) === "hidden" ? (
+            {rows.length === 0 &&
+              anyOnline &&
+              (emptyBoard(activeFolderFilter, hiddenCount) === "hidden" ? (
                 <AllHiddenState
                   count={hiddenCount}
-                  onShow={store.restoreAllSessions}
+                  onShow={() => {
+                    for (const { host } of shownHosts) host.store.restoreAllSessions();
+                  }}
                 />
               ) : (
-                <EmptyState folder={store.folderFilter} />
+                <EmptyState folder={activeFolderFilter} />
               ))}
             </>
             )}
@@ -281,21 +478,29 @@ export default function Agents() {
             </View>
           </ContentColumn>
         )}
-        renderItem={({ item: session, index, section }) => (
+        renderItem={({ item, index, section }) => (
           <ContentColumn style={styles.gutter}>
             <SwipeToDismiss
-              enabled={!searching && canDismiss(session)}
+              enabled={!searching && canDismiss(item.session)}
               onDismiss={() => {
-                store.dismissSession(session.id);
-                setUndo({ id: session.id, name: session.name });
+                item.host.store.dismissSession(item.session.id);
+                setUndo({
+                  key: item.key,
+                  hostId: item.host.id,
+                  id: item.session.id,
+                  name: item.session.name,
+                });
               }}
-              accessibilityLabel={`${session.name}, ${stateStyle(effectiveSessionState(session), color).label}`}
+              accessibilityLabel={`${item.session.name}, ${stateStyle(effectiveSessionState(item.session), color).label}`}
             >
               <AgentRow
-                session={session}
+                session={item.session}
+                owner={item.host.store}
+                selectOwner={() => fleet.select(item.host.id)}
+                deviceName={showingAllDevices ? item.deviceName : undefined}
                 first={index === 0}
                 last={index === section.data.length - 1}
-                match={results?.hits.get(session.id)}
+                match={results?.hits.get(item.key)}
                 query={found?.query}
               />
             </SwipeToDismiss>
@@ -305,7 +510,7 @@ export default function Agents() {
 
       {undo && (
         <Appear
-          key={undo.id}
+          key={undo.key}
           style={[styles.undoBar, { bottom: insets.bottom + space.lg }]}
           offset={8}
         >
@@ -317,7 +522,8 @@ export default function Agents() {
             style={styles.undoButton}
             pressedScale={0.94}
             onPress={() => {
-              store.restoreSession(undo.id);
+              const target = fleet.hosts.find((host) => host.id === undo.hostId);
+              target?.store.restoreSession(undo.id);
               setUndo(null);
             }}
             accessibilityRole="button"
@@ -331,6 +537,140 @@ export default function Agents() {
 }
 
 /**
+ * Device filter beside Folder and state chips: stays out of the way when only
+ * one computer is paired, and opens a compact popover when two or more are.
+ */
+function DeviceFilter({
+  namedHosts,
+  filteredHost,
+}: {
+  namedHosts: NamedHost[];
+  filteredHost: NamedHost | null;
+}) {
+  const fleet = useFleet();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [open, setOpen] = useState(false);
+  const [menuTop, setMenuTop] = useState(210);
+  const anchorRef = useRef<ComponentRef<typeof View>>(null);
+
+  if (namedHosts.length < 2) return null;
+
+  const onlineTotal = namedHosts.filter(({ host }) => host.store.daemonOnline).length;
+  const openMenu = () => {
+    const node = anchorRef.current;
+    if (node?.measureInWindow) {
+      node.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+        if (h > 0) setMenuTop(Math.max(space.md, y + h + space.xs - insets.top));
+        setOpen(true);
+      });
+    } else {
+      setOpen(true);
+    }
+  };
+
+  const items: PopoverItem[] = [
+    {
+      key: "all",
+      label: "All devices",
+      icon: "layers",
+      checked: !filteredHost,
+      detail:
+        onlineTotal === namedHosts.length
+          ? `${onlineTotal} online`
+          : `${onlineTotal}/${namedHosts.length} online`,
+      onPress: () => {
+        fleet.setFilter(null);
+        setOpen(false);
+      },
+    },
+    ...namedHosts.map(({ host, name }) => {
+      const count = host.store.liveSessions.length;
+      return {
+        key: host.id,
+        label: name,
+        icon: "monitor" as const,
+        checked: filteredHost?.host.id === host.id,
+        detail: host.store.daemonOnline
+          ? count === 1
+            ? "1 agent"
+            : `${count} agents`
+          : "Offline",
+        onPress: () => {
+          fleet.select(host.id);
+          fleet.setFilter(host.id);
+          setOpen(false);
+        },
+      };
+    }),
+    {
+      key: "manage",
+      label: "Manage devices",
+      icon: "sliders",
+      onPress: () => {
+        setOpen(false);
+        router.push("/devices");
+      },
+    },
+  ];
+
+  return (
+    <View ref={anchorRef} collapsable={false} style={styles.filterRow}>
+      <MotionPressable
+        onPress={openMenu}
+        style={[styles.filter, filteredHost && styles.filterOn]}
+        pressedScale={0.97}
+        accessibilityRole="button"
+        accessibilityLabel={
+          filteredHost
+            ? `Filtering by device ${filteredHost.name}. Change device`
+            : "Filter by device"
+        }
+      >
+        <Feather
+          name="monitor"
+          size={15}
+          color={filteredHost ? color.workingText : color.muted}
+        />
+        <Text
+          style={[styles.filterLabel, filteredHost && styles.deviceFilterLabelOn]}
+          numberOfLines={1}
+        >
+          {filteredHost ? filteredHost.name : "All devices"}
+        </Text>
+        <Feather
+          name="chevron-down"
+          size={16}
+          color={filteredHost ? color.workingText : color.faint}
+        />
+      </MotionPressable>
+      {filteredHost ? (
+        <MotionPressable
+          onPress={() => fleet.setFilter(null)}
+          style={styles.filterClear}
+          pressedScale={0.94}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Clear device filter"
+        >
+          <Feather name="x" size={16} color={color.muted} />
+        </MotionPressable>
+      ) : null}
+      <Popover
+        visible={open}
+        onDismiss={() => setOpen(false)}
+        top={menuTop}
+        align="left"
+        title="Show agents from"
+        items={items}
+      />
+    </View>
+  );
+}
+
+/**
  * The one control the folder filter adds.
  *
  * Closed it reads "All folders" and the screen behaves exactly as it always
@@ -338,12 +678,20 @@ export default function Agents() {
  * text — and a separate button clears it, so the common way out is one tap
  * and not a trip back through the picker.
  */
-function FolderFilter() {
-  const store = useStore();
+function FolderFilter({
+  host,
+  anyOnline,
+}: {
+  host: NamedHost | null;
+  anyOnline: boolean;
+}) {
+  const activeStore = useStore();
   const router = useRouter();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  const chosen = store.folderFilter;
+  const store = host?.host.store ?? activeStore;
+  const chosen = host ? store.folderFilter : null;
+  const online = host ? store.daemonOnline : anyOnline;
 
   return (
     <View style={styles.filterRow}>
@@ -351,7 +699,7 @@ function FolderFilter() {
         onPress={() => router.push("/folders")}
         style={[styles.filter, chosen && styles.filterOn]}
         pressedScale={0.97}
-        disabled={!store.daemonOnline}
+        disabled={!online}
         accessibilityRole="button"
         accessibilityLabel={
           chosen ? `Filtering by ${chosen}. Change folder` : "Filter by folder"
@@ -369,7 +717,7 @@ function FolderFilter() {
         >
           {chosen ? folderLabel(chosen) : "All folders"}
         </Text>
-        {store.folderLoading ? (
+        {host && store.folderLoading ? (
           <ActivityIndicator size="small" color={color.workingText} />
         ) : (
           <Feather
@@ -403,16 +751,16 @@ function FolderFilter() {
  * section header is the answer rather than a decoration.
  */
 function groupByState(
-  sessions: Session[],
+  rows: FleetSession[],
   color: Palette,
   only: StateFilter | null = null,
 ) {
   const buckets = new Map<
     string,
-    { label: string; tint: string; rank: number; sessions: Session[] }
+    { label: string; tint: string; rank: number; sessions: FleetSession[] }
   >();
-  for (const session of sessions) {
-    const state = effectiveSessionState(session);
+  for (const row of rows) {
+    const state = effectiveSessionState(row.session);
     if (only && state !== only) continue;
     const meta = stateStyle(state, color);
     const bucket = buckets.get(meta.label) ?? {
@@ -421,14 +769,14 @@ function groupByState(
       rank: meta.rank,
       sessions: [],
     };
-    bucket.sessions.push(session);
+    bucket.sessions.push(row);
     buckets.set(meta.label, bucket);
   }
   return Array.from(buckets.values())
     .map((bucket) => ({
       ...bucket,
       sessions: bucket.sessions.sort(
-        (a, b) => b.lastActivityAt - a.lastActivityAt,
+        (a, b) => b.session.lastActivityAt - a.session.lastActivityAt,
       ),
     }))
     .sort((a, b) => a.rank - b.rank);
@@ -436,12 +784,19 @@ function groupByState(
 
 function AgentRow({
   session,
+  owner,
+  selectOwner,
+  deviceName,
   first = true,
   last = true,
   match,
   query,
 }: {
   session: Session;
+  owner?: Store;
+  selectOwner?(): void;
+  /** Shown on the row when sessions from more than one computer share the list. */
+  deviceName?: string;
   /** Where the row sits in its section: a section reads as one card. */
   first?: boolean;
   last?: boolean;
@@ -449,7 +804,8 @@ function AgentRow({
   match?: SearchHit;
   query?: string;
 }) {
-  const store = useStore();
+  const activeStore = useStore();
+  const store = owner ?? activeStore;
   const router = useRouter();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
@@ -457,17 +813,16 @@ function AgentRow({
   const displayState = effectiveSessionState(session);
   const agent = agentLabel(session.kind);
   const open = () => {
-    if (!match) {
-      router.push(`/session/${encodeURIComponent(session.id)}`);
-      return;
-    }
-    // One that ended, and is in no list, is kept so its screen can show it.
-    if (!store.sessions.some((other) => other.id === session.id)) store.rememberSession(session);
-    // One template, not two joined: the route's type is kept, which a joined
-    // string loses.
-    router.push(
-      `/session/${encodeURIComponent(session.id)}?message=${encodeURIComponent(match.messageId)}&find=${encodeURIComponent(query ?? "")}`,
-    );
+    selectOwner?.();
+    if (!store.credentials) return;
+    if (match && !store.sessions.some(other => other.id === session.id)) store.rememberSession(session);
+    router.push({
+      pathname: "/session/[id]",
+      params: {
+        id: session.id, device: draftNamespace(store.credentials),
+        ...(match ? { message: match.messageId, find: query ?? "" } : {}),
+      },
+    });
   };
 
   if (session.question && !match) {
@@ -486,7 +841,7 @@ function AgentRow({
           pressedScale={0.98}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel={`${session.name}, needs you. Open session`}
+          accessibilityLabel={`${session.name}${deviceName ? ` on ${deviceName}` : ""}, needs you. Open session`}
         >
           <View style={styles.pill}>
             <View
@@ -495,7 +850,7 @@ function AgentRow({
             <Text style={styles.pillLabel}>Needs you</Text>
           </View>
           <Text style={styles.askName} numberOfLines={1}>
-            {session.name}
+            {deviceName ? `${session.name} · ${deviceName}` : session.name}
           </Text>
           <Text style={styles.age}>{ago(session.lastActivityAt)}</Text>
           <Feather name="chevron-right" size={16} color={color.faint} />
@@ -530,7 +885,7 @@ function AgentRow({
       ]}
       pressedScale={0.985}
       accessibilityRole="button"
-      accessibilityLabel={`${session.name}, ${outOfUsage ? outOfUsageLabel(outOfUsage) : stateStyle(displayState, color).label}`}
+      accessibilityLabel={`${session.name}${deviceName ? ` on ${deviceName}` : ""}, ${outOfUsage ? outOfUsageLabel(outOfUsage) : stateStyle(displayState, color).label}`}
     >
       <View
         style={[
@@ -581,7 +936,7 @@ function AgentRow({
           {/* Filtered to one folder, the path is the same on every row and
               says nothing. The agent's name takes the space instead, which
               is the fact that does vary once a folder holds five CLIs. */}
-          {store.folderFilter ? (
+          {!deviceName && store.folderFilter ? (
             <Text style={styles.meta} numberOfLines={1}>
               {session.model ? `${agent.name} · ${modelLabel(session.model)}` : agent.name}
             </Text>
@@ -595,6 +950,14 @@ function AgentRow({
             </Text>
           )}
         </View>
+        {deviceName ? (
+          <View style={styles.deviceLine}>
+            <Feather name="monitor" size={11} color={color.faint} />
+            <Text style={styles.deviceText} numberOfLines={1}>
+              {deviceName}
+            </Text>
+          </View>
+        ) : null}
         {session.servers?.length ? (
           <View style={styles.serversLine}>
             <Feather name="globe" size={11} color={color.ok} />
@@ -650,28 +1013,44 @@ function SnippetLine({ hit, query }: { hit: SearchHit; query: string }) {
  * that matched, with what was said under it either way.
  */
 function searchSections(
-  sessions: Session[],
+  rows: FleetSession[],
   query: string,
-  found: SearchResults | null,
+  found: FleetSearchResults | null,
   color: Palette,
   /** The folder filter, when one is chosen: it narrows what was said too. */
   inFolder: ((cwd: string) => boolean) | null,
+  includeDeviceName: boolean,
 ) {
   const needle = query.toLowerCase();
-  const named = sessions
-    .filter((session) => session.name.toLowerCase().includes(needle) || session.cwd.toLowerCase().includes(needle))
-    .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  const listed = new Set(named.map((session) => session.id));
+  const named = rows
+    .filter(
+      ({ session, deviceName }) =>
+        session.name.toLowerCase().includes(needle) ||
+        session.cwd.toLowerCase().includes(needle) ||
+        (includeDeviceName && deviceName.toLowerCase().includes(needle)),
+    )
+    .sort((a, b) => b.session.lastActivityAt - a.session.lastActivityAt);
+  const listed = new Set(named.map((row) => row.key));
+  const byKey = new Map(rows.map((row) => [row.key, row]));
   const hits = new Map<string, SearchHit>();
-  const others: Session[] = [];
-  for (const hit of found?.hits ?? []) {
-    const session = hit.session;
-    if (!session || hits.has(session.id)) continue;
+  const others: FleetSession[] = [];
+  for (const entry of found?.hits ?? []) {
+    const session = entry.hit.session;
+    if (!session || hits.has(entry.key)) continue;
     if (inFolder && !inFolder(session.cwd)) continue;
-    hits.set(session.id, hit);
-    if (!listed.has(session.id)) others.push(sessions.find((other) => other.id === session.id) ?? session);
+    hits.set(entry.key, entry.hit);
+    if (!listed.has(entry.key)) {
+      others.push(
+        byKey.get(entry.key) ?? {
+          key: entry.key,
+          host: entry.host,
+          deviceName: entry.deviceName,
+          session,
+        },
+      );
+    }
   }
-  const sections: { label: string; tint: string; rank: number; sessions: Session[] }[] = [];
+  const sections: { label: string; tint: string; rank: number; sessions: FleetSession[] }[] = [];
   if (named.length) sections.push({ label: "Agents", tint: color.muted, rank: 0, sessions: named });
   if (others.length) sections.push({ label: "In messages", tint: color.muted, rank: 1, sessions: others });
   return { sections, hits };
@@ -753,11 +1132,11 @@ function effectiveSessionState(session: Session): Session["state"] {
 }
 
 function ConnectionChip({
+  label,
   online,
-  incompatible,
 }: {
+  label: string;
   online: boolean;
-  incompatible: boolean;
 }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
@@ -769,12 +1148,8 @@ function ConnectionChip({
           { backgroundColor: online ? color.ok : color.error },
         ]}
       />
-      <Text style={styles.chipText}>
-        {online
-          ? "Mac connected"
-          : incompatible
-            ? "Update required"
-            : "Reconnecting"}
+      <Text style={styles.chipText} numberOfLines={1}>
+        {label}
       </Text>
     </View>
   );
@@ -783,18 +1158,28 @@ function ConnectionChip({
 /**
  * The one row of controls above the list.
  *
- * Folder on the left, then a count per state. Horizontally scrollable rather
- * than wrapped: a second line here would put the first agent below the fold
- * again, which is the thing this replaced.
+ * Device (when more than one is paired) and Folder on the left, then a count
+ * per state. Horizontally scrollable rather than wrapped: a second line here
+ * would put the first agent below the fold again, which is the thing this
+ * replaced.
  */
 function FilterBar({
   counts,
   ended,
+  stateFilter,
+  setStateFilter,
+  namedHosts,
+  filteredHost,
+  anyOnline,
 }: {
   counts: { needsYou: number; working: number; idle: number };
   ended: number;
+  stateFilter: StateFilter | null;
+  setStateFilter(next: StateFilter | null): void;
+  namedHosts: NamedHost[];
+  filteredHost: NamedHost | null;
+  anyOnline: boolean;
 }) {
-  const store = useStore();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const chips: { key: StateFilter; label: string; value: number; tint: string }[] = [
@@ -806,6 +1191,7 @@ function FilterBar({
   if (ended > 0) {
     chips.push({ key: "ended", label: "Ended", value: ended, tint: color.muted });
   }
+  const folderHost = filteredHost ?? (namedHosts.length === 1 ? namedHosts[0] : null);
 
   return (
     <ScrollView
@@ -815,15 +1201,16 @@ function FilterBar({
       contentContainerStyle={styles.filterBarRow}
       keyboardShouldPersistTaps="handled"
     >
-      <FolderFilter />
+      <DeviceFilter namedHosts={namedHosts} filteredHost={filteredHost} />
+      <FolderFilter host={folderHost} anyOnline={anyOnline} />
       {chips
-        .filter((chip) => chip.value > 0 || store.stateFilter === chip.key)
+        .filter((chip) => chip.value > 0 || stateFilter === chip.key)
         .map((chip) => {
-        const on = store.stateFilter === chip.key;
+        const on = stateFilter === chip.key;
         return (
           <MotionPressable
             key={chip.key}
-            onPress={() => store.setStateFilter(on ? null : chip.key)}
+            onPress={() => setStateFilter(on ? null : chip.key)}
             style={[styles.stateChip, on && styles.stateChipOn]}
             pressedScale={0.96}
             accessibilityRole="button"
@@ -872,7 +1259,13 @@ function AllHiddenState({ count, onShow }: { count: number; onShow(): void }) {
   );
 }
 
-function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
+function OfflineBanner({
+  lastSeenAt,
+  subject = "Your Mac is",
+}: {
+  lastSeenAt: number | null;
+  subject?: string;
+}) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   return (
@@ -882,7 +1275,7 @@ function OfflineBanner({ lastSeenAt }: { lastSeenAt: number | null }) {
       </View>
       <View style={styles.bannerCopy}>
         <Text style={styles.bannerText}>
-          Your Mac is offline
+          {subject} offline
           {lastSeenAt ? ` · last seen ${ago(lastSeenAt)} ago` : ""}
         </Text>
         <Text style={styles.bannerHint}>
@@ -1012,13 +1405,16 @@ const makeSiteStyles = (c: Palette) =>
       alignItems: "center",
       gap: 7,
       height: 32,
+      maxWidth: "70%",
+      flexShrink: 1,
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       backgroundColor: c.surface,
       ...edged(c),
     },
-    chipDot: { width: 7, height: 7, borderRadius: 4 },
+    chipDot: { width: 7, height: 7, borderRadius: 4, flexShrink: 0 },
     chipText: {
+      flexShrink: 1,
       ...font.sansMedium,
       fontSize: size.caption,
       color: c.textSecondary,
@@ -1102,6 +1498,11 @@ const makeSiteStyles = (c: Palette) =>
     },
     filterLabelOn: {
       ...font.monoMedium,
+      fontSize: size.caption,
+      color: c.text,
+    },
+    deviceFilterLabelOn: {
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.text,
     },
@@ -1202,6 +1603,8 @@ const makeSiteStyles = (c: Palette) =>
     },
     serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
     serversText: { ...font.mono, fontSize: scaled(12), color: c.muted },
+    deviceLine: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 1 },
+    deviceText: { flexShrink: 1, ...font.sansMedium, fontSize: size.label, color: c.faint },
     avatarLoader: {
       position: "absolute",
       right: -5,
@@ -1419,14 +1822,17 @@ const makeClassicStyles = (c: Palette) =>
       alignItems: "center",
       gap: 7,
       height: 32,
+      maxWidth: "70%",
+      flexShrink: 1,
       paddingHorizontal: space.md,
       borderRadius: radius.pill,
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.line,
     },
-    chipDot: { width: 7, height: 7, borderRadius: 4 },
+    chipDot: { width: 7, height: 7, borderRadius: 4, flexShrink: 0 },
     chipText: {
+      flexShrink: 1,
       ...font.sansMedium,
       fontSize: size.caption,
       color: c.textSecondary,
@@ -1512,6 +1918,11 @@ const makeClassicStyles = (c: Palette) =>
     },
     filterLabelOn: {
       ...font.monoMedium,
+      fontSize: size.caption,
+      color: c.workingText,
+    },
+    deviceFilterLabelOn: {
+      ...font.sansMedium,
       fontSize: size.caption,
       color: c.workingText,
     },
@@ -1615,6 +2026,8 @@ const makeClassicStyles = (c: Palette) =>
     },
     serversLine: { flexDirection: "row", alignItems: "center", gap: 5 },
     serversText: { ...font.mono, fontSize: scaled(12), color: c.muted },
+    deviceLine: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 1 },
+    deviceText: { flexShrink: 1, ...font.sansMedium, fontSize: size.label, color: c.faint },
     avatarLoader: {
       position: "absolute",
       right: -5,

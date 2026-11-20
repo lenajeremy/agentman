@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
+import type { Host } from "../lib/fleet";
 import { useManager } from "../lib/manager";
 import { sessionNeedsAnswer } from "../lib/question-alerts";
 import { useStore } from "../lib/store";
@@ -15,16 +16,30 @@ import { edged } from "./Brand";
  * Agentman, pinned above the agents it manages: where the user spends most of
  * their time, so it stands apart from the list, as it does on the Mac.
  */
-export function AgentmanCard() {
+export function AgentmanCard({
+  host,
+  deviceName,
+  onSelect,
+  stacked,
+}: {
+  host?: Host;
+  deviceName?: string;
+  onSelect?(): void;
+  /** Tighten bottom spacing when another Agentman card sits directly below. */
+  stacked?: boolean;
+} = {}) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  const manager = useManager();
-  const store = useStore();
+  const activeManager = useManager();
+  const activeStore = useStore();
+  const manager = host?.manager ?? activeManager;
+  const store = host?.store ?? activeStore;
   const router = useRouter();
   if (!manager.supported) return null;
 
-  const waiting = store.visibleSessions.filter(sessionNeedsAnswer).length;
-  const working = store.visibleSessions.filter((session) => session.state === "busy").length;
+  const sessions = deviceName ? store.liveSessions : store.visibleSessions;
+  const waiting = sessions.filter(sessionNeedsAnswer).length;
+  const working = sessions.filter((session) => session.state === "busy").length;
   const cards = manager.openCards.length;
   const summary =
     cards > 0 ? (cards === 1 ? "1 card waiting for you" : `${cards} cards waiting for you`)
@@ -33,18 +48,22 @@ export function AgentmanCard() {
     : working > 0 ? (working === 1 ? "1 agent working" : `${working} agents working`)
     : "All quiet";
   const attention = cards > 0 || waiting > 0;
+  const title = deviceName ? `Agentman · ${deviceName}` : "Agentman";
 
   return (
     <MotionPressable
-      onPress={() => router.push("/agentman")}
-      style={styles.card}
+      onPress={() => {
+        onSelect?.();
+        router.push("/agentman");
+      }}
+      style={[styles.card, stacked && styles.cardStacked]}
       pressedScale={0.985}
       accessibilityRole="button"
-      accessibilityLabel={`Agentman. ${summary}${manager.unread > 0 ? `. ${manager.unread} new` : ""}`}
+      accessibilityLabel={`${title}. ${summary}${manager.unread > 0 ? `. ${manager.unread} new` : ""}`}
     >
       <BrandMark size={36} ring={color.surface} />
       <View style={styles.words}>
-        <Text style={styles.name}>Agentman</Text>
+        <Text style={styles.name} numberOfLines={1}>{title}</Text>
         <Text style={[styles.summary, attention && styles.attention]} numberOfLines={1}>
           {summary}
         </Text>
@@ -74,6 +93,7 @@ const makeSiteStyles = (c: Palette) =>
       backgroundColor: c.cream,
       ...edged(c, 3),
     },
+    cardStacked: { marginBottom: space.sm },
     words: { flex: 1, gap: 2 },
     name: { ...font.sansMedium, fontSize: size.body, color: c.text },
     summary: { ...font.sans, fontSize: size.caption, color: c.muted },
@@ -105,6 +125,7 @@ const makeClassicStyles = (c: Palette) =>
       borderColor: c.line,
       backgroundColor: c.surface,
     },
+    cardStacked: { marginBottom: space.sm },
     words: { flex: 1, gap: 2 },
     name: { ...font.sansMedium, fontSize: size.body, color: c.text },
     summary: { ...font.sans, fontSize: size.caption, color: c.muted },

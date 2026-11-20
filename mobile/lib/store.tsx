@@ -15,8 +15,6 @@ import {
   Client,
   ConnectionState,
   Credentials,
-  clearCredentials,
-  loadCredentials,
 } from "./client";
 import {
   applyAgentActionResult,
@@ -52,7 +50,7 @@ import { draftNamespace } from "./draft-policy";
 import { resumeOnce } from "./resume";
 import { folderContains } from "./folders";
 import { ALERT_SOUND_FINISHED, ALERT_SOUND_NEEDS_YOU } from "./alert-sounds";
-import { isPushActive, obtainPushToken, setPushActive } from "./push";
+import { obtainPushToken } from "./push";
 import {
   DEFAULT_NOTIFY_PREFS,
   NOTIFY_PREFS_KEY,
@@ -72,6 +70,7 @@ import { clearDraft } from "./drafts";
 import { newFrameId } from "./id";
 import { failPending } from "./pending-requests";
 import {
+  Worktree,
   Artifact,
   DaemonEvent,
   DaemonInfo,
@@ -124,8 +123,9 @@ interface PageState {
   retentionLimited?: boolean;
 }
 
-interface Store {
+export interface Store {
   ready: boolean;
+  pushActive: boolean;
   credentials: Credentials | null;
   connection: ConnectionState;
   /** Whether the Mac itself is reachable, which is distinct from the relay. */
@@ -139,13 +139,14 @@ interface Store {
    *  stay hidden until they are triggered again. Deliberately separate from
    *  `sessions` — a hidden session must still be openable by id, or a
    *  notification for one would lead to a screen that cannot load. */
+  liveSessions: Session[];
   visibleSessions: Session[];
   messages: Record<string, Message[]>;
   pageState: Record<string, PageState>;
   pending: PendingSend[];
   actions: PendingAgentAction[];
 
-  signIn(creds: Credentials): void;
+  signIn(creds: Credentials, name?: string): Promise<void>;
   signOut(): Promise<void>;
   /** Which alerts this phone wants. */
   notifyPrefs: NotifyPrefs;
@@ -190,6 +191,7 @@ interface Store {
      *  branch list_commits reads. */
     history?: { commit?: string; ref?: string },
   ): Promise<WorkspaceResult>;
+  worktrees(path: string, newName?: string): Promise<Worktree[]>;
   /** Browse one directory: its child folders, and how many agents each has
    *  under it. Counts are absent from a Mac too old to send them. */
   listDirectories(path: string): Promise<{ names: string[]; folders: Folder[] }>;
@@ -321,7 +323,7 @@ interface AskRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-const StoreContext = createContext<Store | null>(null);
+export const StoreContext = createContext<Store | null>(null);
 
 export function useStore(): Store {
   const store = useContext(StoreContext);
@@ -340,7 +342,7 @@ function clearSettledDrafts(before: PendingSend[], after: PendingSend[]): void {
   }
 }
 
-function notifyQuestion(session: Session, prefs: NotifyPrefs, agentmanOn: boolean) {
+function notifyQuestion(session: Session, prefs: NotifyPrefs, agentmanOn: boolean, pushActive: boolean, deviceId: string) {
   if (Platform.OS === "web") return;
   // While Agentman is on, its card is what tells you, unless you asked to
   // hear from this agent too.
@@ -351,7 +353,7 @@ function notifyQuestion(session: Session, prefs: NotifyPrefs, agentmanOn: boolea
   if (
     !shouldAlertOnPhone("needsYou", prefs, {
       appActive: AppState.currentState === "active",
-      pushActive: isPushActive(),
+      pushActive,
     })
   ) {
     return;
@@ -361,15 +363,20 @@ function notifyQuestion(session: Session, prefs: NotifyPrefs, agentmanOn: boolea
       title: `${session.name || session.kind} needs your answer`,
       body: session.question?.prompt || "The agent is waiting for your input.",
       sound: ALERT_SOUND_NEEDS_YOU,
-      data: { sessionId: session.id, kind: "question" },
+      data: { deviceId, sessionId: session.id, kind: "question" },
     },
     trigger: null,
   }).catch(() => {});
 }
 
-export function StoreProvider({ children }: { children: React.ReactNode }) {
+export function StoreProvider({ children, credentials, signIn, signOut }: {
+  children: React.ReactNode;
+  credentials: Credentials | null;
+  signIn: Store["signIn"];
+  signOut: Store["signOut"];
+}) {
+  const scope = credentials ? draftNamespace(credentials) : "unpaired";
   const [ready, setReady] = useState(false);
-  const [credentials, setCredentials] = useState<Credentials | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [daemonOnline, setDaemonOnline] = useState(false);
   const [daemonInfo, setDaemonInfo] = useState<DaemonInfo | null>(null);
@@ -520,6 +527,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // Whether the Mac is sending alerts by push decides whether the app
   // schedules its own. See lib/push-registration.ts.
   const pushToken = useRef<string | null>(null);
+  const [pushActive, setPushActive] = useState(false);
   const pushRegistration = useRef(initialPushRegistration);
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -528,7 +536,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [notifyPrefs, setNotifyPrefsState] = useState<NotifyPrefs>(DEFAULT_NOTIFY_PREFS);
   const notifyPrefsRef = useRef<NotifyPrefs>(DEFAULT_NOTIFY_PREFS);
   useEffect(() => {
-    void AsyncStorage.getItem(NOTIFY_PREFS_KEY)
+    void AsyncStorage.getItem(NOTIFY_PREFS_KEY + "." + scope)
       .then((raw) => {
         const prefs = parseNotifyPrefs(raw);
         notifyPrefsRef.current = prefs;
@@ -624,7 +632,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         const alerts = reconcileQuestionAlerts(announcedQuestions.current, list);
         announcedQuestions.current = alerts.announced;
-        for (const session of alerts.newlyPending) notifyQuestion(session, notifyPrefsRef.current, agentmanOnRef.current);
+        for (const session of alerts.newlyPending) notifyQuestion(session, notifyPrefsRef.current, agentmanOnRef.current, pushRegistration.current.active, scope);
         setPending((current) => {
           const next = settleQueuedEchoes(
             clearQueuedForSessionTransitions(current, previous, list),
@@ -643,7 +651,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setDismissals((current) => {
           const next = prune(list, current);
           if (Object.keys(next).length !== Object.keys(current).length) {
-            void saveDismissals(next);
+            void saveDismissals(next, scope);
           }
           return next;
         });
@@ -655,7 +663,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!updated) break;
         const alert = updateQuestionAlerts(announcedQuestions.current, updated);
         announcedQuestions.current = alert.announced;
-        if (alert.newlyPending) notifyQuestion(alert.newlyPending, notifyPrefsRef.current, agentmanOnRef.current);
+        if (alert.newlyPending) notifyQuestion(alert.newlyPending, notifyPrefsRef.current, agentmanOnRef.current, pushRegistration.current.active, scope);
         const previous = sessionsRef.current;
         const currentIndex = previous.findIndex((session) => session.id === updated.id);
         const next = currentIndex < 0
@@ -825,7 +833,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           Platform.OS !== "web" &&
           shouldAlertOnPhone("finished", notifyPrefsRef.current, {
             appActive: AppState.currentState === "active",
-            pushActive: isPushActive(),
+            pushActive: pushRegistration.current.active,
           }) &&
           agentSpeaks(notifyPrefsRef.current, { agentmanOn: agentmanOnRef.current, asked: current?.alerts === true })
         ) {
@@ -834,7 +842,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               title: `${event.sessionName ?? "Agent"} finished`,
               body: event.preview || "Tap to see what it did.",
               sound: ALERT_SOUND_FINISHED,
-              data: { sessionId: event.sessionId },
+              data: { deviceId: scope, sessionId: event.sessionId },
             },
             trigger: null,
           }).catch(() => {});
@@ -862,6 +870,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         break;
       }
 
+      case "worktrees":
+      case "worktree":
       case "directories":
       case "folders":
       case "directory_sessions":
@@ -1067,33 +1077,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const creds = await loadCredentials();
-        setCredentials(creds);
-        if (creds) attach(creds);
-        else setConnection("unpaired");
-      } catch {
-        // SecureStore can reject after an OS restore or a keychain reset. Do
-        // not leave the provider permanently on its blank loading screen; let
-        // the user pair again and recover.
-        setCredentials(null);
-        setConnection("unpaired");
-      } finally {
-        setReady(true);
-      }
-    })();
+    if (credentials) attach(credentials);
+    else setConnection("unpaired");
+    setReady(true);
     return () => {
       clearWorkspaceRequests();
       clearLaunchRequests();
       clearAskRequests();
       clientRef.current?.close();
+      clientRef.current = null;
+      if (pushTimer.current) clearTimeout(pushTimer.current);
     };
-  }, [attach, clearWorkspaceRequests, clearLaunchRequests]);
+  }, [attach, credentials, clearWorkspaceRequests, clearLaunchRequests]);
 
   // Restore what the user hid before the app was last closed.
   useEffect(() => {
-    void loadDismissals().then(setDismissals);
+    void loadDismissals(scope).then(setDismissals);
   }, []);
 
   // A phone spends most of its life asleep. Reconnect the moment it wakes,
@@ -1168,9 +1167,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (daemonOnline && folderFilterRef.current) loadFolderSessions(folderFilterRef.current);
   }, [daemonOnline, loadFolderSessions]);
 
+  const liveSessions = useMemo(() => sessions.filter(session => !isHidden(session, dismissals)), [sessions, dismissals]);
   const visibleSessions = useMemo(() => {
     if (!folderFilter) {
-      return sessions.filter((session) => !isHidden(session, dismissals));
+      return liveSessions;
     }
     // Live wins over the snapshot: discovery knows the state, the question
     // and whether the session can still be typed into, none of which a
@@ -1184,7 +1184,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     }
     return merged.filter((session) => !isHidden(session, dismissals));
-  }, [sessions, folderSessions, folderFilter, folderRoot, dismissals]);
+  }, [sessions, liveSessions, folderSessions, folderFilter, folderRoot, dismissals]);
 
   // Moving through a form, or closing its question: sent for the question on
   // screen, and settled on its own reply, as a switch is.
@@ -1233,68 +1233,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       daemonInfo,
       lastSeenAt,
       sessions,
+      liveSessions,
       visibleSessions,
       messages,
       pageState,
       pending,
       actions,
 
-      signIn(creds) {
-		// Pairing to another daemon is an account boundary. Never retain the
-		// previous machine's transcripts or pending messages on the new board.
-		pageRequests.current.clear();
-		catchUpRequests.current.clear();
-		desiredSubscriptions.current.clear();
-		pendingInitialLoads.current.clear();
-		pendingCatchUps.current.clear();
-		setSessions([]);
-		messagesRef.current = {};
-		setMessages({});
-		setPageState({});
-		setPending([]);
-		setActions([]);
-		setDismissals({});
-		announcedQuestions.current.clear();
-		sessionsRef.current = [];
-		void saveDismissals({});
-        setCredentials(creds);
-        attach(creds);
+      signIn,
+      async signOut() {
+        if (pushToken.current && clientRef.current) {
+          clientRef.current.registerPush(pushToken.current, { finished: false, needsYou: false, agentman: false, agents: false });
+        }
+        try {
+          await signOut();
+        } catch (error) {
+          if (clientRef.current) registerPushToken(clientRef.current);
+          throw error;
+        }
       },
+      pushActive,
 
       notifyPrefs,
       setNotifyPrefs(prefs: NotifyPrefs) {
         notifyPrefsRef.current = prefs;
         setNotifyPrefsState(prefs);
-        void AsyncStorage.setItem(NOTIFY_PREFS_KEY, JSON.stringify(prefs)).catch(() => {});
+        void AsyncStorage.setItem(NOTIFY_PREFS_KEY + "." + scope, JSON.stringify(prefs)).catch(() => {});
         if (clientRef.current) registerPushToken(clientRef.current);
-      },
-
-      async signOut() {
-        clearWorkspaceRequests();
-        clearLaunchRequests();
-        clearAskRequests();
-        clientRef.current?.close();
-        clientRef.current = null;
-        await clearCredentials();
-        setCredentials(null);
-        setSessions([]);
-        messagesRef.current = {};
-        setMessages({});
-		setPageState({});
-		setPending([]);
-		setActions([]);
-		pageRequests.current.clear();
-		catchUpRequests.current.clear();
-		desiredSubscriptions.current.clear();
-		pendingInitialLoads.current.clear();
-		pendingCatchUps.current.clear();
-		announcedQuestions.current.clear();
-		sessionsRef.current = [];
-		setDaemonOnline(false);
-		setLastSeenAt(null);
-        setConnection("unpaired");
-        setDismissals({});
-        void saveDismissals({});
       },
 
       refresh() {
@@ -1528,7 +1493,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!session || !canDismiss(session)) return;
         setDismissals((current) => {
           const next = recordDismissal(session, current);
-          void saveDismissals(next);
+          void saveDismissals(next, scope);
           return next;
         });
       },
@@ -1538,14 +1503,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           if (!(sessionId in current)) return current;
           const next = { ...current };
           delete next[sessionId];
-          void saveDismissals(next);
+          void saveDismissals(next, scope);
           return next;
         });
       },
 
       restoreAllSessions() {
         setDismissals(() => {
-          void saveDismissals({});
+          void saveDismissals({}, scope);
           return {};
         });
       },
@@ -1618,6 +1583,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!isHistoryRequest(type)) return request;
         return request.catch((reason: unknown) => {
           throw new Error(historyError(reason instanceof Error ? reason.message : String(reason)));
+        });
+      },
+
+      worktrees(path, newName) {
+        return new Promise<Worktree[]>((resolve, reject) => {
+          const id = clientRef.current?.send(newName
+            ? { type: "create_worktree", path, text: newName }
+            : { type: "list_worktrees", path });
+          if (!id) return reject(new Error("Device disconnected."));
+          const timer = setTimeout(() => settleLaunchRequest(id), 120_000);
+          launchRequests.current.set(id, {
+            resolve: event => resolve(event.worktree ? [event.worktree] : event.worktrees ?? []),
+            reject, timer,
+          });
         });
       },
 
@@ -1953,7 +1932,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         };
       },
     }),
-    [ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderRoot, folderLoading, setFolderFilter, folderSessions, foundSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests, settleAskRequest],
+    [signIn, signOut, pushActive, scope, ready, credentials, connection, daemonOnline, daemonInfo, lastSeenAt, sessions, liveSessions, visibleSessions, messages, pageState, pending, actions, dismissals, folderFilter, folderRoot, folderLoading, setFolderFilter, folderSessions, foundSessions, stateFilter, notifyPrefs, attach, settleServerRequest, settleWorkspaceRequest, settleLaunchRequest, resumeSessionOnce, registerPushToken, clearLaunchRequests, clearWorkspaceRequests, settleAskRequest],
   );
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;

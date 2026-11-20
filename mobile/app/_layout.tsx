@@ -2,14 +2,13 @@ import { useFonts } from "expo-font";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { LogBox, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ThemeProvider, useTheme } from "../lib/appearance";
-import { StoreProvider } from "../lib/store";
-import { ManagerProvider } from "../lib/manager";
+import { FleetProvider, useFleet } from "../lib/fleet";
 import { UpdatesProvider } from "../lib/updates-context";
 import { simulatorRoute } from "../lib/simulator";
 import { palettes } from "../lib/theme";
@@ -32,6 +31,9 @@ Notifications.setNotificationHandler({
 function NotificationNavigation() {
   const router = useRouter();
 
+  const fleet = useFleet();
+  const latest = useRef(fleet);
+  latest.current = fleet;
   useEffect(() => {
     if (Platform.OS === "web") return;
     const handled = new Set<string>();
@@ -43,10 +45,21 @@ function NotificationNavigation() {
       const data = response.notification.request.content.data;
       const sessionId = data?.sessionId;
       // Agentman's word, cards included, is in its conversation.
-      if (data?.agentman === true) {
+      const { hosts, select, setFilter } = latest.current;
+      const owner = hosts.find(host => host.id === data?.deviceId);
+      if (owner) {
+        if (router.canDismiss()) router.dismissAll();
+        select(owner.id);
+        setFilter(null);
+      }
+      if ((data?.deviceId && !owner) || (!owner && hosts.length !== 1)) {
+        setFilter(null);
+        if (router.canDismiss()) router.dismissAll();
+        router.replace("/");
+      } else if (data?.agentman === true) {
         router.push("/agentman");
       } else if (typeof sessionId === "string" && sessionId) {
-        router.push(`/session/${encodeURIComponent(sessionId)}`);
+        router.push({ pathname: "/session/[id]", params: { id: sessionId, device: (owner ?? hosts[0]).id } });
       }
       void Notifications.clearLastNotificationResponseAsync().catch(() => {});
     };
@@ -135,8 +148,7 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
     // swipe on the status board silently does nothing on Android.
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.paper }}>
       <SafeAreaProvider>
-        <StoreProvider>
-          <ManagerProvider>
+        <FleetProvider>
           <UpdatesProvider>
             <NotificationNavigation />
             <SimulatorLaunch />
@@ -153,8 +165,7 @@ function ThemedApp({ fontsLoaded }: { fontsLoaded: boolean }) {
               <Stack.Screen name="update" options={{ presentation: "modal", animation: "default" }} />
             </Stack>
           </UpdatesProvider>
-          </ManagerProvider>
-        </StoreProvider>
+          </FleetProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

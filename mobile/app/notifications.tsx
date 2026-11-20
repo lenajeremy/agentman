@@ -10,7 +10,7 @@ import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { NotifyChoice } from "../lib/notification-prefs";
-import { isPushActive, pushFailureReason } from "../lib/push";
+import { pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { edged, eyebrow, screenTitle } from "../components/Brand";
@@ -149,7 +149,7 @@ export default function NotificationSettings() {
                 : "Agentman is off, so each agent notifies you itself."}
             </Text>
             <Text style={styles.footnote}>
-              {isPushActive()
+              {store.pushActive
                 ? "Your Mac sends these, so they reach you even when the app has been closed for a while."
                 : pushFailureReason() ||
                   "Without push, these only arrive while the app is still running in the background."}

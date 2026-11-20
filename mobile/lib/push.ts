@@ -20,21 +20,6 @@ import { simulatorRoute } from "./simulator";
 export { looksLikePushToken };
 
 /**
- * True once the Mac has accepted a push token, meaning alerts now arrive from
- * the daemon. The app stops scheduling its own from that point, so one finished
- * turn does not produce two notifications.
- */
-let pushActive = false;
-
-export function isPushActive(): boolean {
-  return pushActive;
-}
-
-export function setPushActive(active: boolean): void {
-  pushActive = active;
-}
-
-/**
  * The EAS project the token is minted against.
  *
  * Read from both places it can live. expoConfig is populated from the manifest

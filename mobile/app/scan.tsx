@@ -1,7 +1,7 @@
 import * as Haptics from "expo-haptics";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import Feather from "@expo/vector-icons/Feather";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -30,7 +30,7 @@ import { PairIllustration } from "../components/Illustrations";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { pairWithToken } from "../lib/client";
-import { confirmPairingReplacement } from "../lib/confirm";
+import { confirmAddDevice } from "../lib/confirm";
 import { parsePairingPayload } from "../lib/pairing";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
@@ -49,6 +49,7 @@ const ON_CAMERA = "#FFFFFF";
  */
 export default function Scan() {
   const store = useStore();
+  const { name } = useLocalSearchParams<{ name?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
@@ -72,12 +73,13 @@ export default function Scan() {
       const redeem = async () => {
         try {
           const creds = await pairWithToken(payload.relayUrl, payload.token);
-          store.signIn(creds);
+          await store.signIn(creds, name);
           if (Platform.OS !== "web") {
             void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
               () => {},
             );
           }
+          if (router.canDismiss()) router.dismissAll();
           router.replace("/");
         } catch (err) {
           setError(err instanceof Error ? err.message : "That code did not work.");
@@ -90,10 +92,10 @@ export default function Scan() {
 
       if (store.credentials) {
         // Redeeming a QR consumes its one-time token. Confirm before doing that
-        // or silently replacing the Mac this phone is already paired with.
-        confirmPairingReplacement(
-          "Replace current pairing?",
-          "This will replace the relay currently paired with Agentman on this phone.",
+        // when adding another computer.
+        confirmAddDevice(
+          "Add this computer?",
+          "Add this computer to the devices available on this phone.",
           () => void redeem(),
           () => {
             setBusy(false);
@@ -105,7 +107,7 @@ export default function Scan() {
 
       await redeem();
     },
-    [router, store],
+    [router, store, name],
   );
 
   if (!permission) {

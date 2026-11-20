@@ -1,3 +1,4 @@
+import { draftNamespace } from "./draft-policy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
@@ -58,18 +59,6 @@ export async function loadCredentials(): Promise<Credentials | null> {
 	return legacy;
 }
 
-export async function saveCredentials(creds: Credentials): Promise<void> {
-	const normalized = normalizeCredentials(creds);
-	if (!normalized) throw new Error("Refusing to store invalid relay credentials.");
-	const raw = JSON.stringify(normalized);
-	if (Platform.OS === "web") {
-		await AsyncStorage.setItem(STORAGE_KEY, raw);
-		return;
-	}
-	await SecureStore.setItemAsync(STORAGE_KEY, raw, SECURE_OPTIONS);
-	await AsyncStorage.removeItem(STORAGE_KEY);
-}
-
 export async function clearCredentials(): Promise<void> {
 	if (Platform.OS !== "web") {
 		await SecureStore.deleteItemAsync(STORAGE_KEY);
@@ -123,7 +112,6 @@ export async function pair(
     const creds = normalizeCredentials({ relayUrl: base, token: body.token });
     if (!creds) throw new Error("The relay did not return a valid token.");
 
-    await saveCredentials(creds);
     return creds;
   } catch (error) {
     if (controller.signal.aborted) {
@@ -411,7 +399,7 @@ export class Client {
   ): string | null {
     const id = newFrameId();
     return this.write(id, {
-      type: "register_push", pushToken: token, device: deviceInfo(), ...(notify ? { notify } : {}),
+      type: "register_push", pushToken: token, device: deviceInfo(), ...(notify ? { notify: { ...notify, sourceId: draftNamespace(this.creds) } } : {}),
     }) ? id : null;
   }
 

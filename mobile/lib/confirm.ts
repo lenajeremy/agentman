@@ -1,7 +1,7 @@
 import { Alert, Platform } from "react-native";
 
 /** Cross-platform confirmation; React Native Web's Alert.alert is a no-op. */
-export function confirmPairingReplacement(
+export function confirmAddDevice(
   title: string,
   message: string,
   onConfirm: () => void,
@@ -17,6 +17,6 @@ export function confirmPairingReplacement(
   }
   Alert.alert(title, message, [
     { text: "Cancel", style: "cancel", onPress: onCancel },
-    { text: "Replace", style: "destructive", onPress: onConfirm },
+    { text: "Add", onPress: onConfirm },
   ]);
 }

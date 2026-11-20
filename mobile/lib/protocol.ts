@@ -266,6 +266,8 @@ export type RequestType =
   | "tools_title"
   | "read_file_chunk"
   | "read_seen_file_chunk"
+  | "list_worktrees"
+  | "create_worktree"
   | "list_directories"
   | "start_session"
   | "list_folders"
@@ -339,7 +341,7 @@ export interface Request {
   /** Expo push token on register_push. */
   pushToken?: string;
   /** Which alerts this phone wants pushed, on register_push. */
-  notify?: { finished: boolean; needsYou: boolean; agentman: boolean; agents: boolean };
+  notify?: { sourceId?: string; finished: boolean; needsYou: boolean; agentman: boolean; agents: boolean };
   /** What this phone says about itself, for the Mac's list of devices: on
    *  register_push and on the session list asked for on connecting. */
   device?: DeviceInfo;
@@ -477,6 +479,8 @@ export type EventType =
   | "server_stopped"
   | "error"
   | "workspace"
+  | "worktrees"
+  | "worktree"
   | "directories"
   | "session_started"
   | "folders"
@@ -767,6 +771,8 @@ export interface DaemonEvent {
   workspace?: WorkspaceResult;
   directories?: string[];
   path?: string;
+  worktree?: Worktree;
+  worktrees?: Worktree[];
   /** Agent counts. The whole answer on "folders"; alongside `directories` on
    *  a browse listing, one entry per child that has agents under it. */
   folders?: Folder[];
@@ -1058,6 +1064,7 @@ export interface ManagerSchedule {
 
 /** The agentman running on the Mac. */
 export interface DaemonInfo {
+  deviceName?: string;
   version: string;
   /** The newest release. Absent until the Mac has checked, or when its
    *  checks are switched off. */
@@ -1080,6 +1087,12 @@ export interface ReleaseNote {
   date?: number;
   changes?: string[];
   url?: string;
+}
+
+export interface Worktree {
+  name: string;
+  branch?: string;
+  launchPath?: string;
 }
 
 /** One directory agents have run in.
@@ -1167,7 +1180,7 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
   if (!isRecord(value) || !isOneOf(value.type, [
     "sessions", "session_update", "session_gone", "messages", "page",
     "turn_complete", "send_result", "server_opened", "server_stopped", "error", "workspace",
-    "directories", "session_started", "folders", "directory_sessions",
+    "worktree", "worktrees", "directories", "session_started", "folders", "directory_sessions",
     "session_ended", "artifacts", "tools_title",
     "manager_entry", "manager_delta", "manager_history", "manager_status",
     "manager_brief", "manager_schedules", "manager_settings",
@@ -1346,6 +1359,12 @@ export function decodeDaemonEvent(value: unknown): DaemonEvent | null {
       if (isRecord(value.workspace) && value.workspace.sessionId === undefined) value.workspace.sessionId = "agentman";
       if (!isWorkspaceResult(value.workspace)) return null;
       break;
+    case "worktree":
+      if (!isWorktree(value.worktree)) return null;
+      break;
+    case "worktrees":
+      if (value.worktrees !== undefined && !boundedArray(value.worktrees, 10000, isWorktree)) return null;
+      break;
     case "directories":
       if (!optionalBoundedString(value.path, 4096) ||
           (value.directories !== undefined &&
@@ -1408,9 +1427,15 @@ function optionalFolders(value: unknown): boolean {
   return value === undefined || boundedArray(value, 500, isFolder);
 }
 
+function isWorktree(value: unknown): value is Worktree {
+  return isRecord(value) && boundedString(value.name, 4096, true) &&
+    optionalBoundedString(value.branch, 4096) && optionalBoundedString(value.launchPath, 4096);
+}
+
 export function isDaemonInfo(value: unknown): value is DaemonInfo {
   return isRecord(value) &&
     boundedString(value.version, 64, true) &&
+    optionalBoundedString(value.deviceName, 512) &&
     optionalBoundedString(value.latest, 64) &&
     optionalFiniteNumber(value.behind) &&
     (value.releases === undefined || boundedArray(value.releases, 20, isReleaseNote)) &&

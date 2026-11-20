@@ -567,3 +567,11 @@ test("a form's steps arrive with its question, and steps the app can't read are 
   assert.equal(odd.session.question?.step, undefined);
   assert.equal(odd.session.question?.closable, undefined);
 });
+
+test("worktrees carry the launch path and older daemons can omit it", () => {
+  const launchable = { name: "mobile", branch: "mobile", launchPath: "Agentman/Worktrees/repo/mobile" };
+  const listed = { type: "worktrees", worktrees: [launchable, { name: "repo" }] };
+  assert.deepEqual(decodeDaemonEvent(listed), listed);
+  assert.deepEqual(decodeDaemonEvent({ type: "worktree", worktree: launchable })?.worktree, launchable);
+  assert.equal(decodeDaemonEvent({ type: "worktrees", worktrees: [{ name: "repo", launchPath: 0 }] }), null);
+});

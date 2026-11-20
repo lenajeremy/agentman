@@ -126,7 +126,14 @@ export function VoiceButton({
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    button: { minWidth: 34, height: 34, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
+    button: {
+      minWidth: 34,
+      height: 34,
+      borderRadius: radius.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
+    },
     recording: { backgroundColor: c.errorText, paddingHorizontal: 12 },
     row: { flexDirection: "row", alignItems: "center", gap: 7 },
     stop: { width: 9, height: 9, borderRadius: 2, backgroundColor: "#FFFFFF" },

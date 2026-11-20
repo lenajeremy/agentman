@@ -288,14 +288,15 @@ export default function AgentmanScreen() {
                   <Feather name="plus" size={20} color={reachable ? color.textSecondary : color.faint} />
                 )}
               </MotionPressable>
-              <View style={styles.toolbarGap} />
-              {settings ? (
-                <MotionPressable onPress={() => setModelMenu(true)} style={styles.modelButton} hitSlop={6}
-                  accessibilityRole="button" accessibilityLabel={`Model ${modelName(settings.chatModel)}. Switch model`}>
-                  <Text style={styles.modelText} numberOfLines={1}>{modelName(settings.chatModel)}</Text>
-                  <Feather name="chevron-down" size={13} color={color.muted} />
-                </MotionPressable>
-              ) : null}
+              <View style={[styles.modelSlot, Boolean(settings) && styles.modelSlotFilled]}>
+                {settings ? (
+                  <MotionPressable onPress={() => setModelMenu(true)} style={styles.modelButton} hitSlop={6}
+                    accessibilityRole="button" accessibilityLabel={`Model ${modelName(settings.chatModel)}. Switch model`}>
+                    <Text style={styles.modelText} numberOfLines={1} ellipsizeMode="tail">{modelName(settings.chatModel)}</Text>
+                    <Feather name="chevron-down" size={13} color={color.muted} style={styles.modelChevron} />
+                  </MotionPressable>
+                ) : null}
+              </View>
               <VoiceButton
                 disabled={!reachable}
                 onText={(spoken) => setDraft((current) => addSpoken(current, spoken))}
@@ -722,19 +723,29 @@ const makeSiteStyles = (c: Palette) =>
       fontSize: size.body,
       color: c.text,
     },
-    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs, minWidth: 0 },
+    modelSlot: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+    },
+    modelSlotFilled: { minWidth: 76 },
     modelButton: {
       flexDirection: "row",
       alignItems: "center",
       gap: 3,
       height: 32,
-      maxWidth: 200,
-      paddingHorizontal: 10,
+      maxWidth: "100%",
+      minWidth: 0,
+      flexShrink: 1,
+      paddingHorizontal: 7,
       borderRadius: radius.pill,
     },
-    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
-    toolbarGap: { flex: 1 },
-    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+    modelChevron: { flexShrink: 0 },
+    modelText: { flexShrink: 1, minWidth: 0, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center", flexShrink: 0 },
     send: {
       width: 36,
       height: 36,
@@ -742,6 +753,7 @@ const makeSiteStyles = (c: Palette) =>
       backgroundColor: c.flood,
       alignItems: "center",
       justifyContent: "center",
+      flexShrink: 0,
     },
     sendDisabled: { backgroundColor: c.fill },
   });
@@ -886,19 +898,29 @@ const makeClassicStyles = (c: Palette) =>
       fontSize: size.body,
       color: c.text,
     },
-    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs, minWidth: 0 },
+    modelSlot: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+    },
+    modelSlotFilled: { minWidth: 76 },
     modelButton: {
       flexDirection: "row",
       alignItems: "center",
       gap: 3,
       height: 32,
-      maxWidth: 200,
-      paddingHorizontal: 10,
+      maxWidth: "100%",
+      minWidth: 0,
+      flexShrink: 1,
+      paddingHorizontal: 7,
       borderRadius: radius.pill,
     },
-    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
-    toolbarGap: { flex: 1 },
-    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+    modelChevron: { flexShrink: 0 },
+    modelText: { flexShrink: 1, minWidth: 0, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    attach: { width: 34, height: 34, borderRadius: radius.md, alignItems: "center", justifyContent: "center", flexShrink: 0 },
     send: {
       width: 36,
       height: 36,
@@ -906,6 +928,7 @@ const makeClassicStyles = (c: Palette) =>
       backgroundColor: c.working,
       alignItems: "center",
       justifyContent: "center",
+      flexShrink: 0,
     },
     sendDisabled: { backgroundColor: c.fill },
   });

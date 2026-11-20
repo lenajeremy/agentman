@@ -1,7 +1,8 @@
+import { useFleet } from "../../lib/fleet";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Feather from "@expo/vector-icons/Feather";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { type ComponentRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -134,7 +135,19 @@ interface Finding {
   problem?: string;
 }
 
-export default function SessionScreen() {
+export default function SessionRoute() {
+  const { device } = useLocalSearchParams<{ device?: string }>();
+  const { active, hosts, select } = useFleet();
+  const paired = !!device && hosts.some(host => host.id === device);
+  useFocusEffect(useCallback(() => {
+    if (device && paired && device !== active) select(device);
+  }, [device, paired, active, select]));
+  if (device && !paired) return <Redirect href="/" />;
+  if (device && device !== active) return null;
+  return <SessionScreen key={active} />;
+}
+
+function SessionScreen() {
   // A search opens the conversation at a message, with its words found.
   const { id, message: foundMessage, find } = useLocalSearchParams<{ id: string; message?: string; find?: string }>();
   const sessionId = decodeURIComponent(String(id));
@@ -1583,21 +1596,30 @@ export default function SessionScreen() {
                     )}
                   </MotionPressable>
                   {session && headerControls ? <ModeControl {...headerControls} disabled={switchLocked} /> : null}
-                  <View style={styles.toolbarGap} />
                   {/* Beside send, as in Claude's and ChatGPT's apps: the model
                     is part of what you are about to send, and choosing it
-                    belongs where the message is written, not in the header. */}
-                  {session?.model || switching?.kind === "model" ? (
-                    <ModelButton
-                      agent={session?.kind}
-                      model={modelLabel(
-                        (switching?.kind === "model" ? switching.value : session?.model) ?? "",
-                      )}
-                      pending={switching?.kind === "model"}
-                      onPress={modelChoices ? () => openSwitchMenu("model") : undefined}
-                      disabled={switchLocked}
-                    />
-                  ) : null}
+                    belongs where the message is written, not in the header.
+                    A flex slot owns the space between mode and voice so a
+                    long model name truncates inside it instead of pushing
+                    send past the edge of the field. */}
+                  <View
+                    style={[
+                      styles.modelSlot,
+                      Boolean(session?.model || switching?.kind === "model") && styles.modelSlotFilled,
+                    ]}
+                  >
+                    {session?.model || switching?.kind === "model" ? (
+                      <ModelButton
+                        agent={session?.kind}
+                        model={modelLabel(
+                          (switching?.kind === "model" ? switching.value : session?.model) ?? "",
+                        )}
+                        pending={switching?.kind === "model"}
+                        onPress={modelChoices ? () => openSwitchMenu("model") : undefined}
+                        disabled={switchLocked}
+                      />
+                    ) : null}
+                  </View>
                   <VoiceButton
                     disabled={!canSend || awaitingSend}
                     onText={(spoken) => setDraft((current) => addSpoken(current, spoken))}
@@ -1759,11 +1781,15 @@ function ModelButton({
   const { color } = useTheme();
   const body = (
     <>
-      {agent ? <AgentIcon kind={agent} size={14} /> : null}
-      <Text style={[styles.modelText, pending && styles.switchPending]} numberOfLines={1}>
+      {agent ? (
+        <View style={styles.modelIcon}>
+          <AgentIcon kind={agent} size={14} />
+        </View>
+      ) : null}
+      <Text style={[styles.modelText, pending && styles.switchPending]} numberOfLines={1} ellipsizeMode="tail">
         {pending ? `${model}…` : model}
       </Text>
-      {onPress ? <Feather name="chevron-down" size={13} color={color.muted} /> : null}
+      {onPress ? <Feather name="chevron-down" size={13} color={color.muted} style={styles.modelChevron} /> : null}
     </>
   );
   if (!onPress) {
@@ -2856,20 +2882,31 @@ const makeSiteStyles = (c: Palette) =>
       paddingTop: space.sm,
       paddingLeft: space.sm,
     },
-    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
-    toolbarGap: { flex: 1 },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs, minWidth: 0 },
+    modelSlot: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+    },
+    modelSlotFilled: { minWidth: 76 },
     modelButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 5,
+      gap: 4,
       height: 32,
-      maxWidth: 200,
-      paddingHorizontal: 10,
+      maxWidth: "100%",
+      minWidth: 0,
+      flexShrink: 1,
+      paddingHorizontal: 7,
       borderRadius: radius.pill,
     },
     modelButtonPressed: { backgroundColor: c.fill },
-    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
-    contextText: { ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
+    modelIcon: { flexShrink: 0 },
+    modelChevron: { flexShrink: 0 },
+    modelText: { flexShrink: 1, minWidth: 0, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    contextText: { flexShrink: 0, ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.
@@ -2889,6 +2926,7 @@ const makeSiteStyles = (c: Palette) =>
       borderRadius: radius.md,
       alignItems: "center",
       justifyContent: "center",
+      flexShrink: 0,
     },
     // The site's orange, the one colour that asks for a tap.
     send: {
@@ -2898,6 +2936,7 @@ const makeSiteStyles = (c: Palette) =>
       backgroundColor: c.flood,
       alignItems: "center",
       justifyContent: "center",
+      flexShrink: 0,
     },
     sendDisabled: { backgroundColor: c.fillStrong },
   });
@@ -3253,20 +3292,31 @@ const makeClassicStyles = (c: Palette) =>
       paddingTop: space.sm,
       paddingLeft: space.sm,
     },
-    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs },
-    toolbarGap: { flex: 1 },
+    toolbar: { flexDirection: "row", alignItems: "center", gap: space.xs, minWidth: 0 },
+    modelSlot: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+    },
+    modelSlotFilled: { minWidth: 76 },
     modelButton: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 5,
+      gap: 4,
       height: 32,
-      maxWidth: 200,
-      paddingHorizontal: 10,
+      maxWidth: "100%",
+      minWidth: 0,
+      flexShrink: 1,
+      paddingHorizontal: 7,
       borderRadius: radius.pill,
     },
     modelButtonPressed: { backgroundColor: c.fill },
-    modelText: { flexShrink: 1, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
-    contextText: { ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
+    modelIcon: { flexShrink: 0 },
+    modelChevron: { flexShrink: 0 },
+    modelText: { flexShrink: 1, minWidth: 0, ...font.sansMedium, fontSize: scaled(13), color: c.muted },
+    contextText: { flexShrink: 0, ...font.sans, fontSize: scaled(12), color: c.faint, fontVariant: ["tabular-nums"] },
     // A wrapper so the long press has something to land on: the gesture cannot
     // be attached to the TextInput itself without swallowing taps that should
     // place the caret.
@@ -3286,6 +3336,7 @@ const makeClassicStyles = (c: Palette) =>
       borderRadius: radius.md,
       alignItems: "center",
       justifyContent: "center",
+      flexShrink: 0,
     },
     send: {
       width: 36,
@@ -3294,6 +3345,7 @@ const makeClassicStyles = (c: Palette) =>
       backgroundColor: c.working,
       alignItems: "center",
       justifyContent: "center",
+      flexShrink: 0,
     },
     sendDisabled: { backgroundColor: c.fillStrong },
   });

@@ -14,6 +14,7 @@ import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { agentCount, folderLabel } from "../lib/folders";
+import { hostName, useFleet } from "../lib/fleet";
 import { Folder } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { useDirectoryBrowser } from "../lib/use-directory-browser";
@@ -37,16 +38,29 @@ import { edged, eyebrow, hardShadow, screenTitle } from "../components/Brand";
  * standing in. Making the row do both would mean guessing which one was meant.
  */
 export default function Folders() {
-  const store = useStore();
+  const activeStore = useStore();
+  const fleet = useFleet();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  const browser = useDirectoryBrowser();
+  const [hostId, setHostId] = useState(
+    () =>
+      fleet.filter ??
+      fleet.hosts.find((host) => host.id === fleet.active && host.store.daemonOnline)?.id ??
+      fleet.hosts.find((host) => host.store.daemonOnline)?.id ??
+      fleet.active,
+  );
+  const targetIndex = Math.max(0, fleet.hosts.findIndex((host) => host.id === hostId));
+  const targetHost = fleet.hosts[targetIndex] ?? fleet.hosts[0];
+  const store = targetHost?.store ?? activeStore;
+  const targetId = targetHost?.id ?? fleet.active;
+  const browser = useDirectoryBrowser(store);
   const [recent, setRecent] = useState<Folder[]>([]);
 
   const { daemonOnline, listFolders } = store;
   useEffect(() => {
+    setRecent([]);
     if (!daemonOnline) return;
     let live = true;
     void listFolders()
@@ -61,12 +75,16 @@ export default function Folders() {
     return () => {
       live = false;
     };
-    // Store methods change identity as sessions update; only reconnecting
-    // should re-read.
+    // Store methods change identity as sessions update; only switching device
+    // or reconnecting should re-read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [daemonOnline]);
+  }, [daemonOnline, targetId]);
 
   const choose = (path: string) => {
+    if (targetId) {
+      fleet.select(targetId);
+      if (fleet.hosts.length > 1) fleet.setFilter(targetId);
+    }
     store.setFolderFilter(path);
     router.back();
   };
@@ -97,6 +115,42 @@ export default function Folders() {
           <Text style={styles.subtitle}>
             Pick a folder to filter the list. Counts include subfolders.
           </Text>
+
+          {fleet.hosts.length > 1 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.deviceBar}
+              contentContainerStyle={styles.deviceBarRow}
+            >
+              {fleet.hosts.map((host, index) => {
+                const name = hostName(host, index);
+                const selected = host.id === targetId;
+                return (
+                  <MotionPressable
+                    key={host.id}
+                    onPress={() => setHostId(host.id)}
+                    style={[styles.deviceChip, selected && styles.deviceChipOn]}
+                    pressedScale={0.96}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                  >
+                    <Feather
+                      name="monitor"
+                      size={13}
+                      color={selected ? color.onInverse : color.muted}
+                    />
+                    <Text
+                      style={[styles.deviceChipLabel, selected && styles.deviceChipLabelOn]}
+                      numberOfLines={1}
+                    >
+                      {name}
+                    </Text>
+                  </MotionPressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
 
           {store.folderFilter ? (
             <MotionPressable
@@ -298,6 +352,27 @@ function makeSiteStyles(c: Palette) {
       fontSize: size.caption,
       color: c.muted,
     },
+    deviceBar: { marginTop: space.md, marginHorizontal: -space.lg },
+    deviceBarRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+    },
+    deviceChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      minHeight: 36,
+      maxWidth: 200,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      ...edged(c),
+    },
+    deviceChipOn: { backgroundColor: c.inverse },
+    deviceChipLabel: { flexShrink: 1, ...font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+    deviceChipLabelOn: { color: c.onInverse },
     clear: {
       marginTop: space.md,
       alignSelf: "flex-start",
@@ -439,6 +514,28 @@ function makeClassicStyles(c: Palette) {
       fontSize: size.caption,
       color: c.muted,
     },
+    deviceBar: { marginTop: space.md, marginHorizontal: -space.lg },
+    deviceBarRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: space.sm,
+      paddingHorizontal: space.lg,
+    },
+    deviceChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      minHeight: 36,
+      maxWidth: 200,
+      paddingHorizontal: space.md,
+      borderRadius: radius.pill,
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.fillStrong,
+    },
+    deviceChipOn: { backgroundColor: c.inverse, borderColor: c.inverse },
+    deviceChipLabel: { flexShrink: 1, ...font.sansMedium, fontSize: size.caption, color: c.textSecondary },
+    deviceChipLabelOn: { color: c.onInverse },
     clear: {
       marginTop: space.md,
       alignSelf: "flex-start",

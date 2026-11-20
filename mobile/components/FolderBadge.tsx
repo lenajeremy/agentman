@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 
+import { draftNamespace } from "../lib/draft-policy";
 import { useStyles } from "../lib/appearance";
 import { folderIconKey, folderIconNow, loadFolderIcon } from "../lib/folder-icons";
 import { folderName } from "../lib/session-view";
@@ -14,7 +15,7 @@ import { font, Palette } from "../lib/theme";
  */
 export function useFolderIcon(sessionId: string, cwd: string, icon?: string): string | null {
   const store = useStore();
-  const key = icon ? folderIconKey(cwd, icon) : null;
+  const key = icon && store.credentials ? folderIconKey(draftNamespace(store.credentials), cwd, icon) : null;
   const [picture, setPicture] = useState(() => (key ? folderIconNow(key) : null));
 
   useEffect(() => {

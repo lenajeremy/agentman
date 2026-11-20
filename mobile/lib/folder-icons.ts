@@ -13,8 +13,8 @@ import * as ImageManipulator from "expo-image-manipulator";
 const KEPT_SIZE = 128;
 const STORE_PREFIX = "agentman.folderIcon.v2:";
 
-export function folderIconKey(cwd: string, path: string): string {
-  return `${STORE_PREFIX}${cwd}\u0000${path}`;
+export function folderIconKey(device: string, cwd: string, path: string): string {
+  return `${STORE_PREFIX}${device}:${cwd}\u0000${path}`;
 }
 
 const memory = new Map<string, string>();

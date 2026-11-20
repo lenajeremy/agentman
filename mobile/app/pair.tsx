@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -23,6 +22,7 @@ import { Wordmark } from "../components/BrandMark";
 import { DotFill, FloodBand, OutlinedText, Sticker, hardShadow } from "../components/Brand";
 import { ContentColumn } from "../components/ContentColumn";
 import { PairIllustration } from "../components/Illustrations";
+import { SettingsPage } from "../components/SettingsKit";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
 import { pair, pairWithToken } from "../lib/client";
@@ -50,65 +50,11 @@ export default function Pair() {
   const [error, setError] = useState<string | null>(null);
   const [relayFocused, setRelayFocused] = useState(false);
   const [codeFocused, setCodeFocused] = useState(false);
+  const [nameFocused, setNameFocused] = useState(false);
   /** Typing is the fallback, so it stays folded away until asked for. */
   const [manual, setManual] = useState(false);
-  const handledLink = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!store.ready) return;
-    const token = firstParam(params.token);
-    if (!token) return;
-    const relay = firstParam(params.relay) || DEFAULT_RELAY;
-    const identity = `${relay}\u0000${token}`;
-    if (handledLink.current === identity) return;
-    handledLink.current = identity;
-
-    const redeem = async () => {
-      setBusy(true);
-      setError(null);
-      try {
-        const creds = await pairWithToken(relay, token);
-        store.signIn(creds);
-        if (Platform.OS !== "web") {
-          void Haptics.notificationAsync(
-            Haptics.NotificationFeedbackType.Success,
-          ).catch(() => {});
-        }
-        router.replace("/");
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Could not redeem this pairing link. Generate a fresh link and try again.",
-        );
-      } finally {
-        setBusy(false);
-      }
-    };
-
-    if (!store.credentials) {
-      void redeem();
-      return;
-    }
-
-    Alert.alert(
-      "Pair with a different Mac?",
-      "This will replace the relay currently paired with Agentman on this phone.",
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-          onPress: () => router.replace("/"),
-        },
-        {
-          text: "Pair",
-          onPress: () => void redeem(),
-        },
-      ],
-      { cancelable: false },
-    );
-  }, [params.relay, params.token, router, store]);
-
+  const [name, setName] = useState("");
+  const token = firstParam(params.token);
   const canSubmit =
     store.ready &&
     relayUrl.trim().length > 0 &&
@@ -118,19 +64,138 @@ export default function Pair() {
     setBusy(true);
     setError(null);
     try {
-      const creds = await pair(relayUrl, code);
-      store.signIn(creds);
+      const creds = token ? await pairWithToken(firstParam(params.relay) || DEFAULT_RELAY, token) : await pair(relayUrl, code);
+      await store.signIn(creds, name);
       if (Platform.OS !== "web") {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
           () => {},
         );
       }
+      if (router.canDismiss()) router.dismissAll();
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Pairing failed.");
     } finally {
       setBusy(false);
     }
+  }
+
+  const nameField = (
+    <View style={[styles.field, (Boolean(token) || Boolean(store.credentials)) && styles.nameFieldSpaced]}>
+      <Text style={styles.fieldLabel}>Device name (optional)</Text>
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        onFocus={() => setNameFocused(true)}
+        onBlur={() => setNameFocused(false)}
+        placeholder="e.g. Work laptop"
+        placeholderTextColor={color.faint}
+        maxLength={64}
+        returnKeyType="done"
+        accessibilityLabel="Device name"
+        style={[styles.input, styles.nameInput, nameFocused && styles.inputFocused]}
+      />
+    </View>
+  );
+  if (token) return <SettingsPage title="Pair device" intro="Choose a name to recognize this computer on your phone.">
+    {nameField}
+    <MotionPressable style={styles.primaryButton} disabled={busy} onPress={submit} accessibilityRole="button">
+      <Text style={styles.primaryButtonText}>{busy ? "Pairing…" : "Pair device"}</Text>
+    </MotionPressable>
+    {error && <ErrorBox message={error} />}
+  </SettingsPage>;
+  const pairForm = <>
+    {nameField}
+    {error && !manual ? <ErrorBox message={error} /> : null}
+
+    <Appear delay={110} style={styles.actions}>
+      <MotionPressable
+        onPress={() => router.push({ pathname: "/scan", params: { name } })}
+        style={styles.primaryButton}
+        accessibilityRole="button"
+        accessibilityHint="Opens the camera to read the code from your terminal"
+      >
+        <Feather name="maximize" size={18} color={color.onInverse} />
+        <Text style={styles.primaryButtonText}>Scan QR code</Text>
+      </MotionPressable>
+      {!manual ? (
+        <MotionPressable
+          onPress={() => setManual(true)}
+          style={styles.textButton}
+          accessibilityRole="button"
+        >
+          <Text style={styles.textButtonLabel}>Enter the code instead</Text>
+        </MotionPressable>
+      ) : null}
+    </Appear>
+
+    {manual ? (
+      <Appear style={styles.card}>
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Relay address</Text>
+          <TextInput
+            style={[styles.input, relayFocused && styles.inputFocused]}
+            value={relayUrl}
+            onChangeText={setRelayUrl}
+            onFocus={() => setRelayFocused(true)}
+            onBlur={() => setRelayFocused(false)}
+            placeholder="relay.example.com"
+            placeholderTextColor={color.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            inputMode="url"
+            accessibilityLabel="Relay address"
+          />
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Pairing code</Text>
+          <TextInput
+            style={[
+              styles.input,
+              styles.codeInput,
+              codeFocused && styles.inputFocused,
+            ]}
+            value={code}
+            onChangeText={(text) =>
+              setCode(text.replace(/\D/g, "").slice(0, PAIRING_CODE_LENGTH))
+            }
+            onFocus={() => setCodeFocused(true)}
+            onBlur={() => setCodeFocused(false)}
+            placeholder="0000000000"
+            placeholderTextColor={color.faint}
+            keyboardType="number-pad"
+            maxLength={PAIRING_CODE_LENGTH}
+            accessibilityLabel="Pairing code"
+            autoFocus
+          />
+        </View>
+
+        {error ? <ErrorBox message={error} /> : null}
+
+        <MotionPressable
+          onPress={submit}
+          disabled={!canSubmit || busy}
+          style={[
+            styles.primaryButton,
+            (!canSubmit || busy) && styles.buttonDisabled,
+          ]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canSubmit || busy, busy }}
+        >
+          {busy ? (
+            <ActivityIndicator color={color.onInverse} />
+          ) : (
+            <Text style={styles.primaryButtonText}>Pair with this code</Text>
+          )}
+        </MotionPressable>
+      </Appear>
+    ) : null}
+  </>;
+
+  if (store.credentials) {
+    return <SettingsPage title="Add device" intro="Run am pair on the computer you want to add, then scan its QR code or enter the ten digits.">{pairForm}</SettingsPage>;
   }
 
   const lede = (
@@ -191,92 +256,7 @@ export default function Pair() {
             </>
           )}
 
-          {error && !manual ? <ErrorBox message={error} /> : null}
-
-          <Appear delay={110} style={styles.actions}>
-            <MotionPressable
-              onPress={() => router.push("/scan")}
-              style={styles.primaryButton}
-              accessibilityRole="button"
-              accessibilityHint="Opens the camera to read the code from your terminal"
-            >
-              <Feather name="maximize" size={18} color={color.onInverse} />
-              <Text style={styles.primaryButtonText}>Scan QR code</Text>
-            </MotionPressable>
-            {!manual ? (
-              <MotionPressable
-                onPress={() => setManual(true)}
-                style={styles.textButton}
-                accessibilityRole="button"
-              >
-                <Text style={styles.textButtonLabel}>Enter the code instead</Text>
-              </MotionPressable>
-            ) : null}
-          </Appear>
-
-          {manual ? (
-            <Appear style={styles.card}>
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Relay address</Text>
-                <TextInput
-                  style={[styles.input, relayFocused && styles.inputFocused]}
-                  value={relayUrl}
-                  onChangeText={setRelayUrl}
-                  onFocus={() => setRelayFocused(true)}
-                  onBlur={() => setRelayFocused(false)}
-                  placeholder="relay.example.com"
-                  placeholderTextColor={color.faint}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  inputMode="url"
-                  accessibilityLabel="Relay address"
-                />
-              </View>
-
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Pairing code</Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    styles.codeInput,
-                    codeFocused && styles.inputFocused,
-                  ]}
-                  value={code}
-                  onChangeText={(text) =>
-                    setCode(text.replace(/\D/g, "").slice(0, PAIRING_CODE_LENGTH))
-                  }
-                  onFocus={() => setCodeFocused(true)}
-                  onBlur={() => setCodeFocused(false)}
-                  placeholder="0000000000"
-                  placeholderTextColor={color.faint}
-                  keyboardType="number-pad"
-                  maxLength={PAIRING_CODE_LENGTH}
-                  accessibilityLabel="Pairing code"
-                  autoFocus
-                />
-              </View>
-
-              {error ? <ErrorBox message={error} /> : null}
-
-              <MotionPressable
-                onPress={submit}
-                disabled={!canSubmit || busy}
-                style={[
-                  styles.primaryButton,
-                  (!canSubmit || busy) && styles.buttonDisabled,
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !canSubmit || busy, busy }}
-              >
-                {busy ? (
-                  <ActivityIndicator color={color.onInverse} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Pair with this code</Text>
-                )}
-              </MotionPressable>
-            </Appear>
-          ) : null}
+          {pairForm}
 
           <Appear delay={150}>
             <SetupGuide />
@@ -492,6 +472,7 @@ const makeSiteStyles = (c: Palette) =>
       gap: space.lg,
     },
     field: { gap: space.sm },
+    nameFieldSpaced: { marginTop: space.xs },
     fieldLabel: {
       ...font.sansBold,
       fontSize: size.caption,
@@ -508,6 +489,12 @@ const makeSiteStyles = (c: Palette) =>
       color: c.text,
       borderWidth: 1,
       borderColor: "transparent",
+    },
+    nameInput: {
+      ...font.sans,
+      backgroundColor: c.surface,
+      borderWidth: 1.5,
+      borderColor: c.edge,
     },
     inputFocused: { borderColor: c.working, backgroundColor: c.surface },
     codeInput: { fontSize: scaled(24), letterSpacing: 6, textAlign: "center" },
@@ -643,6 +630,7 @@ const makeClassicStyles = (c: Palette) =>
       gap: space.lg,
     },
     field: { gap: space.sm },
+    nameFieldSpaced: { marginTop: space.xs },
     fieldLabel: {
       ...font.sansBold,
       fontSize: size.caption,
@@ -659,6 +647,12 @@ const makeClassicStyles = (c: Palette) =>
       color: c.text,
       borderWidth: 1,
       borderColor: "transparent",
+    },
+    nameInput: {
+      ...font.sans,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
     },
     inputFocused: { borderColor: c.working, backgroundColor: c.surface },
     codeInput: { fontSize: scaled(24), letterSpacing: 6, textAlign: "center" },

@@ -6,7 +6,7 @@ import { AppState, Platform } from "react-native";
 import { agentmanAlert, replyAlert, type AgentmanAlert } from "./agentman-alerts";
 import { ALERT_SOUND_FINISHED, ALERT_SOUND_NEEDS_YOU } from "./alert-sounds";
 import { shouldAlertOnPhone } from "./notification-prefs";
-import { isPushActive } from "./push";
+import { draftNamespace } from "./draft-policy";
 
 import {
   applyDelta,
@@ -98,9 +98,8 @@ export interface Manager {
 
 const LAST_READ_KEY = "agentman.managerLastRead";
 const idle: ManagerStatus = { state: "idle", keySet: true };
-const keptImages = new Map<string, string>();
 
-const ManagerContext = createContext<Manager | null>(null);
+export const ManagerContext = createContext<Manager | null>(null);
 
 export function useManager(): Manager {
   const manager = useContext(ManagerContext);
@@ -114,6 +113,11 @@ function message(reason: unknown): string {
 
 export function ManagerProvider({ children }: { children: ReactNode }) {
   const store = useStore();
+  const deviceId = store.credentials ? draftNamespace(store.credentials) : "";
+  const readKey = LAST_READ_KEY + "." + deviceId;
+  const hasPush = useRef(store.pushActive);
+  hasPush.current = store.pushActive;
+  const keptImages = useRef(new Map<string, string>()).current;
   const [entries, setEntries] = useState<ManagerEntry[]>([]);
   const [hasOlder, setHasOlder] = useState(false);
   const [status, setStatus] = useState<ManagerStatus>(idle);
@@ -137,14 +141,14 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
   // Agentman has to say. With push, the Mac sends these.
   const raise = useCallback((alert: AgentmanAlert | null, sessionId?: string) => {
     if (!alert || Platform.OS === "web") return;
-    const state = { appActive: AppState.currentState === "active", pushActive: isPushActive() };
+    const state = { appActive: AppState.currentState === "active", pushActive: hasPush.current };
     if (!shouldAlertOnPhone(alert.kind, prefsRef.current, state)) return;
     void Notifications.scheduleNotificationAsync({
       content: {
         title: alert.title,
         body: alert.body,
         sound: alert.kind === "needsYou" ? ALERT_SOUND_NEEDS_YOU : ALERT_SOUND_FINISHED,
-        data: { agentman: true, ...(sessionId ? { sessionId } : {}) },
+        data: { deviceId, agentman: true, ...(sessionId ? { sessionId } : {}) },
       },
       trigger: null,
     }).catch(() => {});
@@ -154,10 +158,10 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
 
   // The first launch starts with nothing unread, not the whole history.
   useEffect(() => {
-    void AsyncStorage.getItem(LAST_READ_KEY)
+    void AsyncStorage.getItem(readKey)
       .then((stored) => {
         const value = stored ? Number(stored) : Date.now();
-        if (!stored) void AsyncStorage.setItem(LAST_READ_KEY, String(value)).catch(() => {});
+        if (!stored) void AsyncStorage.setItem(readKey, String(value)).catch(() => {});
         setLastRead(Number.isFinite(value) ? value : Date.now());
       })
       .catch(() => setLastRead(Date.now()));
@@ -264,7 +268,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
     if (!latest) return;
     setLastRead((current) => {
       if (latest <= current) return current;
-      void AsyncStorage.setItem(LAST_READ_KEY, String(latest)).catch(() => {});
+      void AsyncStorage.setItem(readKey, String(latest)).catch(() => {});
       return latest;
     });
   }, []);

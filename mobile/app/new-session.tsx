@@ -15,6 +15,8 @@ import { AgentIcon } from "../components/AgentIcon";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
+import type { Worktree } from "../lib/protocol";
+import { hostName, useFleet } from "../lib/fleet";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space } from "../lib/theme";
 import { edged, eyebrow, hardShadow, screenTitle } from "../components/Brand";
@@ -31,11 +33,27 @@ const agents: { kind: LaunchKind; label: string }[] = [
 ];
 
 export default function NewSession() {
-  const store = useStore();
+  const activeStore = useStore();
+  const fleet = useFleet();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
+  const [hostId, setHostId] = useState(
+    () =>
+      fleet.filter ??
+      fleet.hosts.find((host) => host.id === fleet.active && host.store.daemonOnline)?.id ??
+      fleet.hosts.find((host) => host.store.daemonOnline)?.id ??
+      fleet.active,
+  );
+  const targetIndex = Math.max(0, fleet.hosts.findIndex((host) => host.id === hostId));
+  const targetHost = fleet.hosts[targetIndex] ?? fleet.hosts[0];
+  const store = targetHost?.store ?? activeStore;
+  const targetId = targetHost?.id ?? fleet.active;
+  const targetName = targetHost
+    ? hostName(targetHost, targetIndex)
+    : store.daemonInfo?.deviceName || "this computer";
+
   const [kind, setKind] = useState<LaunchKind>("claude");
   const [path, setPath] = useState("");
   const [directories, setDirectories] = useState<string[]>([]);
@@ -50,8 +68,25 @@ export default function NewSession() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
 
+  const selectHost = (nextId: string) => {
+    if (nextId === hostId) return;
+    setHostId(nextId);
+    setPath("");
+    setDirectories([]);
+    setTrees([]);
+    setDestination("");
+    setBranchName("");
+    setNaming(false);
+    setNewName("");
+    setError("");
+  };
+
   useEffect(() => {
-    if (!store.daemonOnline) return;
+    if (!store.daemonOnline) {
+      setDirectories([]);
+      setLoadingDirectories(false);
+      return;
+    }
     let live = true;
     setLoadingDirectories(true);
     setError("");
@@ -60,10 +95,25 @@ export default function NewSession() {
       .catch((err: Error) => { if (live) setError(err.message); })
       .finally(() => { if (live) setLoadingDirectories(false); });
     return () => { live = false; };
-    // Only a path or connection change should re-read; store methods change
-    // identity as session state updates while this screen is open.
+    // Only a path, host, or connection change should re-read; store methods
+    // change identity as session state updates while this screen is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, store.daemonOnline]);
+  }, [path, targetId, store.daemonOnline]);
+
+  const [trees, setTrees] = useState<Worktree[]>([]);
+  const [destination, setDestination] = useState("");
+  const [branchName, setBranchName] = useState("");
+  useEffect(() => {
+    let current = true;
+    setTrees([]);
+    setDestination("");
+    setBranchName("");
+    if (path && store.daemonOnline) {
+      void store.worktrees(path).then(rows => { if (current) setTrees(rows); }).catch(() => {});
+    }
+    return () => { current = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, targetId, store.daemonOnline, store.credentials]);
 
   const up = () => setPath((current) => current.split("/").slice(0, -1).join("/"));
 
@@ -87,12 +137,21 @@ export default function NewSession() {
     }
   };
   const start = async () => {
-    if (!path || !prompt.trim() || starting || !store.daemonOnline) return;
+    if (!path || !prompt.trim() || (destination === ":new" && !branchName.trim()) || starting || !store.daemonOnline) return;
     setError("");
     setStarting(true);
     try {
-      const id = await store.startSession(kind, path, prompt.trim());
-      router.replace(`/session/${encodeURIComponent(id)}`);
+      let target = destination || path;
+      if (destination === ":new") {
+        const [tree] = await store.worktrees(path, branchName.trim());
+        if (!tree?.launchPath) throw new Error("Update Agentman on this computer to launch in a worktree.");
+        target = tree.launchPath;
+        setTrees(rows => [...rows, tree]);
+        setDestination(target);
+      }
+      if (targetId) fleet.select(targetId);
+      const id = await store.startSession(kind, target, prompt.trim());
+      router.replace({ pathname: "/session/[id]", params: { id, device: targetId } });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the agent.");
       setStarting(false);
@@ -102,13 +161,47 @@ export default function NewSession() {
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}>
-        <ContentColumn style={styles.content}>
+        <View pointerEvents={starting ? "none" : "auto"}><ContentColumn style={styles.content}>
           <MotionPressable onPress={() => router.back()} style={styles.back}
             accessibilityRole="button" accessibilityLabel="Back" hitSlop={12}>
             <Feather name="chevron-left" size={21} color={color.text} />
           </MotionPressable>
           <Text style={styles.title} accessibilityRole="header">New session</Text>
-          <Text style={styles.subtitle}>Start an agent on your Mac.</Text>
+          <Text style={styles.subtitle}>Start an agent on {targetName}.</Text>
+
+          {fleet.hosts.length > 1 ? (
+            <>
+              <Text style={styles.label}>Computer</Text>
+              <View style={styles.agentGrid}>
+                {fleet.hosts.map((host, index) => {
+                  const name = hostName(host, index);
+                  const chosen = host.id === targetId;
+                  const online = host.store.daemonOnline;
+                  return (
+                    <MotionPressable
+                      key={host.id}
+                      onPress={() => selectHost(host.id)}
+                      style={[
+                        styles.agentOption,
+                        chosen && styles.selected,
+                        !online && styles.hostOffline,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: chosen, disabled: !online }}
+                      accessibilityLabel={`${name}, ${online ? "Online" : "Offline"}`}
+                    >
+                      <Feather name="monitor" size={19} color={online ? color.text : color.muted} />
+                      <View style={styles.hostCopy}>
+                        <Text style={styles.agentName} numberOfLines={1}>{name}</Text>
+                        <Text style={styles.hostStatus}>{online ? "Online" : "Offline"}</Text>
+                      </View>
+                      {chosen ? <Feather name="check" size={17} color={color.working} /> : null}
+                    </MotionPressable>
+                  );
+                })}
+              </View>
+            </>
+          ) : null}
 
           <Text style={styles.label}>Agent</Text>
           <View style={styles.agentGrid}>
@@ -123,7 +216,9 @@ export default function NewSession() {
             ))}
           </View>
 
-          <Text style={styles.label}>Folder on your Mac</Text>
+          <Text style={styles.label}>
+            {fleet.hosts.length > 1 ? `Folder on ${targetName}` : "Folder on your Mac"}
+          </Text>
           <View style={styles.pathBar}>
             {path ? <MotionPressable onPress={up} hitSlop={10} style={styles.up}
               accessibilityRole="button" accessibilityLabel="Parent folder">
@@ -176,6 +271,26 @@ export default function NewSession() {
             )}
           </View>
 
+          {trees.length > 0 && <View>
+            <Text style={styles.label}>Worktree</Text>
+            <View style={styles.folderList}>
+              {[{ value: "", label: "Selected folder" },
+                ...trees.filter(t => t.launchPath && t.launchPath !== path).map(t => ({
+                  value: t.launchPath!, label: t.branch || t.name,
+                })),
+                ...(trees.some(t => t.launchPath) ? [{ value: ":new", label: "New worktree…" }] : [])
+              ].map(option => <MotionPressable key={option.value} style={styles.folder}
+                disabled={starting} accessibilityRole="radio" accessibilityState={{ checked: destination === option.value }}
+                onPress={() => setDestination(option.value)}>
+                <Text style={styles.folderName}>{option.label}</Text>
+                {destination === option.value && <Feather name="check" size={18} color={color.working} />}
+              </MotionPressable>)}
+              {destination === ":new" && <View style={styles.folder}><TextInput style={styles.newFolderInput}
+                accessibilityLabel="New worktree branch name" placeholder="Branch name" placeholderTextColor={color.faint}
+                value={branchName} onChangeText={setBranchName} autoCapitalize="none" autoCorrect={false} /></View>}
+              {!trees.some(t => t.launchPath) && <Text style={styles.hint}>Update Agentman on this computer to choose worktrees.</Text>}
+            </View>
+          </View>}
           <Text style={styles.label}>First message</Text>
           <TextInput value={prompt} onChangeText={setPrompt} multiline
             style={styles.prompt} placeholder="What should the agent do?"
@@ -185,13 +300,13 @@ export default function NewSession() {
 
           {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
           <MotionPressable onPress={() => void start()}
-            style={[styles.start, (!path || !prompt.trim() || starting || !store.daemonOnline) && styles.disabled]}
-            disabled={!path || !prompt.trim() || starting || !store.daemonOnline}
+            style={[styles.start, (!path || !prompt.trim() || (destination === ":new" && !branchName.trim()) || starting || !store.daemonOnline) && styles.disabled]}
+            disabled={!path || !prompt.trim() || (destination === ":new" && !branchName.trim()) || starting || !store.daemonOnline}
             accessibilityRole="button" accessibilityLabel="Start session">
             {starting ? <ActivityIndicator color={color.onInverse} /> :
               <Text style={styles.startText}>Start session</Text>}
           </MotionPressable>
-        </ContentColumn>
+        </ContentColumn></View>
       </ScrollView>
     </View>
   );
@@ -213,6 +328,9 @@ const makeSiteStyles = (c: Palette) => StyleSheet.create({
     ...edged(c) },
   // The chosen agent: the site's cream, lifted on its hard shadow.
   selected: { backgroundColor: c.cream, ...edged(c, 3) },
+  hostOffline: { opacity: 0.6 },
+  hostCopy: { flex: 1, minWidth: 0, gap: 2 },
+  hostStatus: { ...font.sans, fontSize: size.label, color: c.muted },
   agentName: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
   pathBar: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: space.sm,
     paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: c.fill },
@@ -257,6 +375,9 @@ const makeClassicStyles = (c: Palette) => StyleSheet.create({
     paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: c.surface,
     borderWidth: 1, borderColor: c.line },
   selected: { borderColor: c.working },
+  hostOffline: { opacity: 0.6 },
+  hostCopy: { flex: 1, minWidth: 0, gap: 2 },
+  hostStatus: { ...font.sans, fontSize: size.label, color: c.muted },
   agentName: { flex: 1, ...font.sansMedium, fontSize: size.body, color: c.text },
   pathBar: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: space.sm,
     paddingHorizontal: space.md, borderRadius: radius.lg, backgroundColor: c.fill },

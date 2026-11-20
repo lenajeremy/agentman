@@ -1,7 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
-import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
@@ -16,7 +16,8 @@ import { useManager } from "../lib/manager";
 import { modelName } from "../lib/manager-models";
 import { NotifyPrefs } from "../lib/notification-prefs";
 import { PRIVACY_POLICY_URL } from "../lib/privacy";
-import { isPushActive, pushFailureReason } from "../lib/push";
+import { pushFailureReason } from "../lib/push";
+import { hostName, useFleet } from "../lib/fleet";
 import { useStore } from "../lib/store";
 import { appSummary, macSummary } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
@@ -51,24 +52,11 @@ export default function Settings() {
   const styles = useStyles(makeStyles);
   const { color, preference, setPreference, look, setLook } = useTheme();
 
-  const unpair = () => {
-    const perform = () => {
-      void store.signOut().then(() => router.replace("/pair"));
-    };
-    if (Platform.OS === "web") {
-      if (globalThis.confirm("Unpair this phone from your Mac?")) perform();
-      return;
-    }
-    Alert.alert(
-      "Unpair this phone?",
-      "You’ll need to run `am pair` on your Mac to reconnect.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Unpair", style: "destructive", onPress: perform },
-      ],
-    );
-  };
-
+  const fleet = useFleet();
+  const activeIndex = Math.max(0, fleet.hosts.findIndex((host) => host.id === fleet.active));
+  const activeHost = fleet.hosts[activeIndex];
+  const deviceLabel =
+    fleet.hosts.length > 1 && activeHost ? hostName(activeHost, activeIndex) : "Your Mac";
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xl }}>
@@ -92,10 +80,12 @@ export default function Settings() {
           <Appear>
             <Text style={styles.sectionLabel}>Connection</Text>
             <View style={styles.card}>
+              <LinkRow icon="monitor" label="Devices" value={String(fleet.hosts.length)} onPress={() => router.push("/devices")} />
+              <View style={styles.divider} />
               <Row label="Relay" value={store.credentials?.relayUrl ?? "—"} mono />
               <View style={styles.divider} />
               <Row
-                label="Your Mac"
+                label={deviceLabel}
                 value={
                   store.daemonOnline
                     ? "Online"
@@ -115,7 +105,7 @@ export default function Settings() {
               <Row
                 label="Background alerts"
                 value={
-                  isPushActive()
+                  store.pushActive
                     ? "On — your Mac can reach you when the app is closed"
                     : pushFailureReason() || "Unavailable in this build"
                 }
@@ -182,7 +172,7 @@ export default function Settings() {
               />
               <View style={styles.divider} />
               <VersionRow
-                label="Your Mac"
+                label={deviceLabel}
                 value={macSummary(updates.daemonInfo)}
                 behind={Boolean(updates.mac)}
                 onPress={() => router.push("/update?kind=mac")}
@@ -256,19 +246,6 @@ export default function Settings() {
                 </MotionPressable>
               </View>
             </View>
-          </Appear>
-
-          <Appear delay={90}>
-            <MotionPressable
-              onPress={unpair}
-              style={styles.unpair}
-              accessibilityRole="button"
-            >
-              <Text style={styles.unpairText}>Unpair this phone</Text>
-            </MotionPressable>
-            <Text style={styles.unpairHint}>
-              Removes the relay credentials stored securely on this device.
-            </Text>
           </Appear>
 
           <View style={styles.signature}>
@@ -481,24 +458,6 @@ const makeSiteStyles = (c: Palette) =>
     // "connected", which is not what a policy link means.
     privacyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
 
-    unpair: {
-      minHeight: 52,
-      borderRadius: radius.pill,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.errorWash,
-      marginTop: space.xl,
-    },
-    unpairText: { ...font.sansBold, fontSize: size.body, color: c.errorText },
-    unpairHint: {
-      ...font.sans,
-      fontSize: size.label,
-      color: c.faint,
-      textAlign: "center",
-      lineHeight: scaled(16),
-      marginTop: space.sm,
-      paddingHorizontal: space.lg,
-    },
     signature: {
       flexDirection: "row",
       alignItems: "center",
@@ -633,24 +592,6 @@ const makeClassicStyles = (c: Palette) =>
     // "connected", which is not what a policy link means.
     privacyLinkText: { ...font.sansMedium, fontSize: size.label, color: c.workingText },
 
-    unpair: {
-      minHeight: 52,
-      borderRadius: radius.pill,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.errorWash,
-      marginTop: space.xl,
-    },
-    unpairText: { ...font.sansBold, fontSize: size.body, color: c.errorText },
-    unpairHint: {
-      ...font.sans,
-      fontSize: size.label,
-      color: c.faint,
-      textAlign: "center",
-      lineHeight: scaled(16),
-      marginTop: space.sm,
-      paddingHorizontal: space.lg,
-    },
     signature: {
       flexDirection: "row",
       alignItems: "center",

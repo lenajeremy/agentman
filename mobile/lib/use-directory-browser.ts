@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { BrowsedFolder, mergeCounts } from "./folders";
-import { useStore } from "./store";
+import { useStore, type Store } from "./store";
 
 /**
  * Walking the Mac's folders.
@@ -12,14 +12,21 @@ import { useStore } from "./store";
  * home, which is what the daemon accepts — it never takes an absolute path
  * from the phone for browsing.
  */
-export function useDirectoryBrowser() {
-  const store = useStore();
+export function useDirectoryBrowser(overrideStore?: Store) {
+  const activeStore = useStore();
+  const store = overrideStore ?? activeStore;
   const [path, setPath] = useState("");
   const [folders, setFolders] = useState<BrowsedFolder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const { daemonOnline, listDirectories } = store;
+  const { daemonOnline, listDirectories, credentials } = store;
+
+  useEffect(() => {
+    setPath("");
+    setFolders([]);
+    setError("");
+  }, [credentials]);
 
   useEffect(() => {
     if (!daemonOnline) return;
@@ -39,10 +46,10 @@ export function useDirectoryBrowser() {
     return () => {
       live = false;
     };
-    // Only a path or connection change should re-read; store methods change
-    // identity as session state updates while this screen is open.
+    // Only a path, device, or connection change should re-read; store methods
+    // change identity as session state updates while this screen is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, daemonOnline]);
+  }, [path, daemonOnline, credentials]);
 
   const down = useCallback((name: string) => {
     setPath((current) => (current ? `${current}/${name}` : name));
