@@ -218,3 +218,175 @@ export function monotonePath(points: { x: number; y: number }[]): string {
 function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
+
+/** Whether a usage summary has any tokens or credits to display. */
+export function hasUsageData(usage: Pick<Usage, "tokens" | "credits">): boolean {
+  const count = usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite + usage.tokens.output;
+  return count > 0 || (usage.credits ?? 0) > 0;
+}
+
+const UNIT_RANK: Record<Unit, number> = { hour: 0, day: 1, week: 2, month: 3 };
+
+/**
+ * Align a bucket's start timestamp to the nearest local calendar boundary so
+ * computers in different time zones (for example a laptop in local time and a
+ * UTC server) merge onto the same day/week/month instead of interleaving.
+ */
+export function alignBucketStart(startMs: number, unit: Unit): number {
+  if (unit === "hour") return Math.round(startMs / 3_600_000) * 3_600_000;
+  const raw = new Date(startMs);
+  const floor = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+  const ceil = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate() + 1);
+  const day = Math.abs(startMs - ceil.getTime()) < Math.abs(startMs - floor.getTime()) ? ceil : floor;
+  if (unit === "day") return day.getTime();
+  if (unit === "week") {
+    const mondayOffset = (day.getDay() + 6) % 7;
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate() - mondayOffset).getTime();
+  }
+  return new Date(day.getFullYear(), day.getMonth(), 1).getTime();
+}
+
+function addTokens(a: Usage["tokens"], b: Usage["tokens"]): Usage["tokens"] {
+  return {
+    input: a.input + b.input,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    output: a.output + b.output,
+  };
+}
+
+function tokenSum(t: Usage["tokens"]): number {
+  return t.input + t.cacheRead + t.cacheWrite + t.output;
+}
+
+function addPart(a?: UsagePart | null, b?: UsagePart | null): UsagePart | undefined {
+  if (!a) return b ?? undefined;
+  if (!b) return a;
+  return { tokens: addTokens(a.tokens, b.tokens), cost: a.cost + b.cost };
+}
+
+function addMap(target: Record<string, number>, source?: Record<string, number>): void {
+  if (!source) return;
+  for (const [kind, value] of Object.entries(source)) {
+    target[kind] = (target[kind] ?? 0) + value;
+  }
+}
+
+/** Combine usage summaries from multiple paired computers into one summary. */
+export function mergeUsage(items: readonly Usage[]): Usage {
+  if (items.length === 1) return items[0];
+  const zero = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  if (items.length === 0) {
+    return { days: 0, unit: "day", sessions: 0, tokens: { ...zero }, cost: { ...zero }, cacheSavings: 0, agents: [], buckets: [], models: [] };
+  }
+
+  let unit = unitOf(items[0]);
+  for (const item of items) {
+    const next = unitOf(item);
+    if (UNIT_RANK[next] > UNIT_RANK[unit]) unit = next;
+  }
+
+  let sessionsCount = 0;
+  let tokensTotal = { ...zero };
+  let costTotal = { ...zero };
+  let creditsTotal = 0;
+  let cacheSavings = 0;
+  let skipped = 0;
+
+  const agentMap = new Map<string, UsageAgent>();
+  const modelMap = new Map<string, UsageModel>();
+  const bucketMap = new Map<number, UsageBucket>();
+
+  for (const item of items) {
+    sessionsCount += item.sessions;
+    tokensTotal = addTokens(tokensTotal, item.tokens);
+    costTotal = addTokens(costTotal, item.cost);
+    creditsTotal += item.credits ?? 0;
+    cacheSavings += item.cacheSavings;
+    skipped += item.skipped ?? 0;
+
+    for (const agent of item.agents ?? []) {
+      const existing = agentMap.get(agent.kind);
+      if (!existing) {
+        agentMap.set(agent.kind, {
+          kind: agent.kind,
+          sessions: agent.sessions,
+          tokens: { ...agent.tokens },
+          cost: agent.cost,
+          ...(agent.credits ? { credits: agent.credits } : {}),
+        });
+      } else {
+        existing.sessions += agent.sessions;
+        existing.tokens = addTokens(existing.tokens, agent.tokens);
+        existing.cost += agent.cost;
+        const nextCredits = (existing.credits ?? 0) + (agent.credits ?? 0);
+        if (nextCredits > 0) existing.credits = nextCredits;
+      }
+    }
+
+    for (const model of item.models ?? []) {
+      const key = `${model.kind}\0${model.model}`;
+      const existing = modelMap.get(key);
+      if (!existing) {
+        modelMap.set(key, {
+          model: model.model,
+          kind: model.kind,
+          tokens: { ...model.tokens },
+          cost: model.cost,
+          priced: model.priced,
+          ...(model.credits ? { credits: model.credits } : {}),
+          ...(model.fast ? { fast: { tokens: { ...model.fast.tokens }, cost: model.fast.cost } } : {}),
+          ...(model.advisor ? { advisor: { tokens: { ...model.advisor.tokens }, cost: model.advisor.cost } } : {}),
+        });
+      } else {
+        existing.tokens = addTokens(existing.tokens, model.tokens);
+        existing.cost += model.cost;
+        existing.priced = existing.priced || model.priced;
+        const nextCredits = (existing.credits ?? 0) + (model.credits ?? 0);
+        if (nextCredits > 0) existing.credits = nextCredits;
+        const fast = addPart(existing.fast, model.fast);
+        if (fast) existing.fast = fast;
+        const advisor = addPart(existing.advisor, model.advisor);
+        if (advisor) existing.advisor = advisor;
+      }
+    }
+
+    for (const bucket of item.buckets ?? []) {
+      const start = alignBucketStart(bucket.start, unit);
+      let existing = bucketMap.get(start);
+      if (!existing) {
+        existing = { start, cost: {}, tokens: {} };
+        bucketMap.set(start, existing);
+      }
+      addMap(existing.cost!, bucket.cost);
+      addMap(existing.tokens!, bucket.tokens);
+      if (bucket.credits && Object.keys(bucket.credits).length > 0) {
+        existing.credits ??= {};
+        addMap(existing.credits, bucket.credits);
+      }
+    }
+  }
+
+  const agents = Array.from(agentMap.values()).sort(
+    (a, b) => (b.cost - a.cost) || (tokenSum(b.tokens) - tokenSum(a.tokens)),
+  );
+  const models = Array.from(modelMap.values()).sort(
+    (a, b) => (b.cost - a.cost) || (tokenSum(b.tokens) - tokenSum(a.tokens)),
+  );
+  const buckets = Array.from(bucketMap.values()).sort((a, b) => a.start - b.start);
+
+  return {
+    days: items[0].days,
+    ...(unit === "hour" ? { hourly: true } : {}),
+    unit,
+    sessions: sessionsCount,
+    tokens: tokensTotal,
+    cost: costTotal,
+    ...(creditsTotal > 0 ? { credits: creditsTotal } : {}),
+    cacheSavings,
+    agents,
+    buckets,
+    models,
+    ...(skipped > 0 ? { skipped } : {}),
+  };
+}

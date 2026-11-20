@@ -151,6 +151,7 @@ function SessionScreen() {
   // A search opens the conversation at a message, with its words found.
   const { id, message: foundMessage, find } = useLocalSearchParams<{ id: string; message?: string; find?: string }>();
   const sessionId = decodeURIComponent(String(id));
+  const { active } = useFleet();
   const store = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -225,7 +226,9 @@ function SessionScreen() {
   // terminal goes on as another: the thread follows it there.
   const successor = store.sessions.find((candidate) => candidate.previous === sessionId)?.id;
   useEffect(() => {
-    if (successor) router.replace(`/session/${encodeURIComponent(successor)}`);
+    if (successor) {
+      router.replace({ pathname: "/session/[id]", params: { id: successor, ...(active ? { device: active } : {}) } });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [successor]);
   const messages = store.messages[sessionId] ?? [];
@@ -627,7 +630,7 @@ function SessionScreen() {
         // they were pointed at, so the id survives. Codex opens a rollout of
         // its own, so the reopened session is a different one to watch.
         if (id && id !== session.id) {
-          router.replace(`/session/${encodeURIComponent(id)}`);
+          router.replace({ pathname: "/session/[id]", params: { id, ...(active ? { device: active } : {}) } });
         }
       })
       // Only a failure ends "reopening" here. Success does not: the request
@@ -685,7 +688,9 @@ function SessionScreen() {
     store
       .handoffSession(session.id)
       .then((id) => {
-        if (id && id !== session.id) router.replace(`/session/${encodeURIComponent(id)}`);
+        if (id && id !== session.id) {
+          router.replace({ pathname: "/session/[id]", params: { id, ...(active ? { device: active } : {}) } });
+        }
       })
       .catch((err: Error) => setMoveError(handoffError(err.message)))
       .finally(() => setMoving(null));

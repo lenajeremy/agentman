@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  agentColor, axisLabel, axisMoney, bucketValue, credits, creditsOnly, modelNote, momentLabel, money, monotonePath, niceAxis,
+  agentColor, alignBucketStart, axisLabel, axisMoney, bucketValue, credits, creditsOnly, hasUsageData, mergeUsage, modelNote, momentLabel, money, monotonePath, niceAxis,
   percent, RANGES, rangeTitle, rowLabel, sessions, tokens, unitOf,
 } from "./usage.ts";
-import { decodeDaemonEvent } from "./protocol.ts";
+import { decodeDaemonEvent, type Usage } from "./protocol.ts";
 
 // The same numbers the Mac's usage page writes.
 test("numbers are written as the Mac writes them", () => {
@@ -119,4 +119,62 @@ test("Kiro shows its credits", () => {
   };
   assert.equal(decodeDaemonEvent({ type: "usage", usage })?.usage?.agents?.[0].credits, 6.5);
   assert.equal(decodeDaemonEvent({ type: "usage", usage: { ...usage, credits: "6.5" } }), null);
+  assert.equal(hasUsageData({ tokens: none }), false);
+  assert.equal(hasUsageData({ tokens: none, credits: 6.5 }), true);
+  assert.equal(hasUsageData({ tokens: { ...none, input: 1 } }), true);
+});
+
+test("usage from multiple computers merges agents, models, and offset-timezone buckets", () => {
+  const localMidnight = new Date(2026, 10, 20, 0, 0, 0, 0).getTime();
+  const offsetByTwoHours = localMidnight + 2 * 3_600_000;
+  const mac: Usage = {
+    days: 30, unit: "day", sessions: 10,
+    tokens: { input: 1000, cacheRead: 2000, cacheWrite: 0, output: 500 },
+    cost: { input: 1, cacheRead: 0.5, cacheWrite: 0, output: 2 },
+    cacheSavings: 4.5,
+    agents: [
+      { kind: "antigravity", sessions: 6, tokens: { input: 600, cacheRead: 1200, cacheWrite: 0, output: 300 }, cost: 2.5 },
+      { kind: "codex", sessions: 4, tokens: { input: 400, cacheRead: 800, cacheWrite: 0, output: 200 }, cost: 1.0 },
+    ],
+    buckets: [{ start: localMidnight, cost: { antigravity: 2.5, codex: 1.0 }, tokens: { antigravity: 2100, codex: 1400 } }],
+    models: [
+      { model: "gemini-4-neon", kind: "antigravity", tokens: { input: 600, cacheRead: 1200, cacheWrite: 0, output: 300 }, cost: 2.5, priced: true },
+      { model: "gpt-6.2-astra", kind: "codex", tokens: { input: 400, cacheRead: 800, cacheWrite: 0, output: 200 }, cost: 1.0, priced: true },
+    ],
+  };
+  const vps: Usage = {
+    days: 30, unit: "day", sessions: 5,
+    tokens: { input: 500, cacheRead: 1000, cacheWrite: 100, output: 250 },
+    cost: { input: 0.5, cacheRead: 0.25, cacheWrite: 0.1, output: 1.15 },
+    cacheSavings: 1.5,
+    skipped: 1,
+    agents: [
+      { kind: "codex", sessions: 5, tokens: { input: 500, cacheRead: 1000, cacheWrite: 100, output: 250 }, cost: 2.0 },
+    ],
+    buckets: [{ start: offsetByTwoHours, cost: { codex: 2.0 }, tokens: { codex: 1850 } }],
+    models: [
+      { model: "gpt-6.2-astra", kind: "codex", tokens: { input: 500, cacheRead: 1000, cacheWrite: 100, output: 250 }, cost: 2.0, priced: true },
+    ],
+  };
+
+  assert.equal(mergeUsage([mac]), mac, "single computer passes through");
+  assert.equal(alignBucketStart(offsetByTwoHours, "day"), localMidnight, "nearby timezone midnight snaps to the same day");
+
+  const combined = mergeUsage([mac, vps]);
+  assert.equal(combined.sessions, 15);
+  assert.equal(combined.tokens.input, 1500);
+  assert.equal(combined.cost.output, 3.15);
+  assert.equal(combined.cacheSavings, 6);
+  assert.equal(combined.skipped, 1);
+  assert.deepEqual(combined.agents?.map((a) => [a.kind, a.sessions, a.cost]), [
+    ["codex", 9, 3.0],
+    ["antigravity", 6, 2.5],
+  ]);
+  assert.equal(combined.buckets?.length, 1, "buckets from different timezones collapse onto one day");
+  assert.equal(combined.buckets?.[0].cost?.codex, 3.0);
+  assert.equal(combined.buckets?.[0].cost?.antigravity, 2.5);
+  assert.deepEqual(combined.models?.map((m) => [m.kind, m.model, m.cost]), [
+    ["codex", "gpt-6.2-astra", 3.0],
+    ["antigravity", "gemini-4-neon", 2.5],
+  ]);
 });

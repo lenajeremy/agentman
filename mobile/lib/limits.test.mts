@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  checkedLabel, elapsed, evenLeft, leftPercent, LIMITS_FOOTNOTE, orderedWindows, pace, resetsLabel, span,
+  checkedLabel, elapsed, evenLeft, leftPercent, LIMITS_FOOTNOTE, limitsFootnote, orderedWindows, pace, resetsLabel, span, visibleDeviceLimits,
 } from "./limits.ts";
 import { decodeDaemonEvent, type LimitWindow } from "./protocol.ts";
 import { agentColor } from "./usage.ts";
@@ -114,4 +114,12 @@ test("Antigravity's quotas are read and ordered", () => {
   assert.equal(leftPercent(windows[2]), 50);
   assert.equal(agentColor("antigravity", false), "#7C5CE6");
   assert.match(LIMITS_FOOTNOTE, /Antigravity/);
+  assert.match(limitsFootnote(true), /each paired computer/);
+  assert.equal(limitsFootnote(false), LIMITS_FOOTNOTE);
+
+  const visible = visibleDeviceLimits([
+    { hostId: "vps", deviceName: "VPS", limits: { agents: [] } },
+    { hostId: "mac", deviceName: "MacBook Pro", limits: event.limits },
+  ]);
+  assert.deepEqual(visible.map((entry) => entry.hostId), ["mac"]);
 });

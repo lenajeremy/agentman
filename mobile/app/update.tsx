@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ContentColumn } from "../components/ContentColumn";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
+import { hostName, useFleet } from "../lib/fleet";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
 import { behindText, PromptKind, versionLabel } from "../lib/updates";
 import { useUpdates } from "../lib/updates-context";
@@ -24,22 +25,30 @@ interface Section {
 }
 
 /**
- * A newer version of the app, or of agentman on the Mac, and what it brings.
+ * A newer version of the app, or of agentman on a paired computer, and what it
+ * brings.
  *
  * Shown once per version from the board, and again from Settings whenever
  * someone wants it. Either way it only informs: the app updates through
- * TestFlight, and the Mac through a command run on the Mac.
+ * TestFlight, and each computer through a command run there.
  */
 export default function UpdateSheet() {
-  const params = useLocalSearchParams<{ kind?: string }>();
+  const params = useLocalSearchParams<{ kind?: string; device?: string }>();
   const kind: PromptKind = params.kind === "mac" ? "mac" : "app";
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
+  const fleet = useFleet();
   const updates = useUpdates();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const multiDevice = fleet.hosts.length > 1;
+  const targetId = params.device || updates.outdatedDevice?.id || fleet.active;
+  const targetIndex = fleet.hosts.findIndex((host) => host.id === targetId);
+  const targetHost = targetIndex >= 0 ? fleet.hosts[targetIndex] : undefined;
+  const deviceName = multiDevice && targetHost ? hostName(targetHost, targetIndex) : "Your Mac";
 
   // Seen is enough: someone who closed it has been told, and Settings keeps
   // the offer for later.
@@ -59,7 +68,7 @@ export default function UpdateSheet() {
   let sections: Section[] = [];
   let primary: { label: string; icon: FeatherName; onPress(): void } | null = null;
   const app = updates.app;
-  const mac = updates.mac;
+  const mac = params.device ? updates.macFor(params.device) : updates.mac;
 
   if (kind === "app" && app) {
     icon = "smartphone";
@@ -81,8 +90,8 @@ export default function UpdateSheet() {
     };
   } else if (kind === "mac" && mac) {
     icon = "monitor";
-    title = `Your Mac is ${behindText(mac.behind)}`;
-    lede = `agentman ${mac.latest} is out. Your Mac runs ${mac.current}.`;
+    title = `${deviceName} is ${behindText(mac.behind)}`;
+    lede = `agentman ${mac.latest} is out. ${deviceName} runs ${mac.current}.`;
     sections = mac.releases.map((release) => ({
       key: release.version,
       heading: release.date ? `${release.version} · ${shortDate(release.date)}` : release.version,
@@ -105,7 +114,7 @@ export default function UpdateSheet() {
     title = "You’re up to date";
     lede = kind === "app"
       ? "This is the newest build of Agentman."
-      : "Your Mac runs the newest agentman.";
+      : `${deviceName} runs the newest agentman.`;
   }
 
   return (
@@ -149,7 +158,9 @@ export default function UpdateSheet() {
 
           {kind === "mac" && mac ? (
             <>
-              <Text style={styles.sectionLabel}>Upgrade on your Mac</Text>
+              <Text style={styles.sectionLabel}>
+                {multiDevice ? `Upgrade on ${deviceName}` : "Upgrade on your Mac"}
+              </Text>
               <View style={styles.command}>
                 <Text style={styles.commandText} selectable>
                   {mac.upgrade}

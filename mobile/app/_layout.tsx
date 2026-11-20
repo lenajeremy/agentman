@@ -57,7 +57,7 @@ function NotificationNavigation() {
         if (router.canDismiss()) router.dismissAll();
         router.replace("/");
       } else if (data?.agentman === true) {
-        router.push("/agentman");
+        router.push({ pathname: "/agentman", params: { device: (owner ?? hosts[0]).id } });
       } else if (typeof sessionId === "string" && sessionId) {
         router.push({ pathname: "/session/[id]", params: { id: sessionId, device: (owner ?? hosts[0]).id } });
       }

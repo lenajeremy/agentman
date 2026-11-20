@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useStyles, useTheme } from "../lib/appearance";
+import { useFleet } from "../lib/fleet";
 import { useManager } from "../lib/manager";
 import { cardIsOpen, cardQuestion } from "../lib/manager-feed";
 import type { ManagerCard, Note, QuestionAnswer } from "../lib/protocol";
@@ -29,6 +30,7 @@ export function ManagerCardView({ card }: { card: ManagerCard }) {
 function OpenCard({ card }: { card: ManagerCard }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
+  const { active } = useFleet();
   const manager = useManager();
   const store = useStore();
   const router = useRouter();
@@ -61,7 +63,7 @@ function OpenCard({ card }: { card: ManagerCard }) {
         <View style={styles.head}>
           <AgentIcon kind={session?.kind ?? ""} size={20} />
           <MotionPressable
-            onPress={() => session && router.push(`/session/${encodeURIComponent(session.id)}`)}
+            onPress={() => session && router.push({ pathname: "/session/[id]", params: { id: session.id, ...(active ? { device: active } : {}) } })}
             disabled={!session}
             style={styles.headName}
           >

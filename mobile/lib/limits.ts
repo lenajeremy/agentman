@@ -1,4 +1,4 @@
-import type { AgentLimits, LimitWindow } from "./protocol";
+import type { AgentLimits, Limits, LimitWindow } from "./protocol";
 
 /**
  * The Limits tab's arithmetic and words, kept apart from the screen so they
@@ -7,6 +7,23 @@ import type { AgentLimits, LimitWindow } from "./protocol";
 
 export const LIMITS_FOOTNOTE =
   "Read from Claude Code, Codex and Antigravity on your Mac, as their own /usage and /status show. Other agents don't report plan limits.";
+
+export function limitsFootnote(multiDevice = false): string {
+  return multiDevice
+    ? "Read from Claude Code, Codex and Antigravity on each paired computer, as their own /usage and /status show. Other agents don't report plan limits."
+    : LIMITS_FOOTNOTE;
+}
+
+export interface DeviceLimits {
+  hostId: string;
+  deviceName: string;
+  limits: Limits;
+}
+
+/** Devices that reported at least one agent with plan limits. */
+export function visibleDeviceLimits(entries: readonly DeviceLimits[]): DeviceLimits[] {
+  return entries.filter((entry) => entry.limits.agents.length > 0);
+}
 
 export type Pace = "ahead" | "on" | "under";
 

@@ -70,6 +70,7 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const [filter, setFilter] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<Record<string, Host>>({});
+  const booted = useRef(false);
   const [problem, setProblem] = useState("");
   const [attempt, retry] = useState(0);
   useEffect(() => {
@@ -108,6 +109,12 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
       const next = current.current.filter(c => draftNamespace(c) !== id);
       await removeDevice(id, next);
       await rename(id, "").catch(() => {});
+      await AsyncStorage.multiRemove([
+        "agentman.deviceName." + id,
+        "agentman.dismissed." + id,
+        "agentman.notifications.v1." + id,
+        "agentman.managerLastRead." + id,
+      ]).catch(() => {});
       current.current = next;
       setDevices(next);
       setSnapshots(old => { const copy = { ...old }; delete copy[id]; return copy; });
@@ -128,13 +135,19 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
       const alias = names[host.id] || undefined;
       return { ...host, alias, name: alias ?? host.daemonName };
     });
+  // Wait for every paired device to publish on cold start before rendering
+  // children so notification routing and multi-device screens see the full
+  // fleet immediately, without ever unmounting children when adding a device
+  // later.
+  const allPublished = devices.length === 0 ? Boolean(snapshots[""]) : hosts.length === devices.length;
+  if (allPublished) booted.current = true;
   const selected = snapshots[active] ?? hosts[0] ?? snapshots[""];
   return <>
     {(devices.length ? devices : [null]).map(creds => {
       const id = creds ? draftNamespace(creds) : "";
       return <DeviceConnection key={id} id={id} credentials={creds} add={add} remove={remove} publish={publish} />;
     })}
-    {selected && <Context.Provider value={{ hosts, active, filter, select, setFilter, rename }}>
+    {booted.current && selected && <Context.Provider value={{ hosts, active, filter, select, setFilter, rename }}>
       <StoreContext.Provider value={selected.store}><ManagerContext.Provider value={selected.manager}>
         {children}
       </ManagerContext.Provider></StoreContext.Provider>

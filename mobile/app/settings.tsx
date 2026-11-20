@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Appear } from "../components/Appear";
 import { BrandMark } from "../components/BrandMark";
 import { ContentColumn } from "../components/ContentColumn";
+import { DevicePicker } from "../components/DevicePicker";
 import { MotionPressable } from "../components/MotionPressable";
 import { LinkRow } from "../components/SettingsKit";
 import { useStyles, useTheme } from "../lib/appearance";
@@ -38,25 +39,50 @@ const LOOKS: { value: Look; label: string }[] = [
 
 export default function Settings() {
   const store = useStore();
-  const manager = useManager();
-  const { loadNotes, loadKeys } = manager;
-  // The counts beside Notes and Keys.
-  useEffect(() => {
-    if (!manager.supported) return;
-    void loadNotes();
-    void loadKeys();
-  }, [manager.supported, loadNotes, loadKeys]);
+  const activeManager = useManager();
+  const fleet = useFleet();
   const updates = useUpdates();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { color, preference, setPreference, look, setLook } = useTheme();
 
-  const fleet = useFleet();
-  const activeIndex = Math.max(0, fleet.hosts.findIndex((host) => host.id === fleet.active));
-  const activeHost = fleet.hosts[activeIndex];
-  const deviceLabel =
-    fleet.hosts.length > 1 && activeHost ? hostName(activeHost, activeIndex) : "Your Mac";
+  const multiDevice = fleet.hosts.length > 1;
+  const managerHosts = fleet.hosts.filter((host) => host.manager.supported);
+  const managerHost =
+    managerHosts.find((host) => host.id === fleet.active) ??
+    managerHosts[0];
+  const manager = managerHost?.manager ?? activeManager;
+  const managerHostIndex = managerHost ? fleet.hosts.findIndex((host) => host.id === managerHost.id) : -1;
+  const managerDeviceName =
+    multiDevice && managerHost && managerHostIndex >= 0 ? hostName(managerHost, managerHostIndex) : null;
+
+  // The counts beside Notes and Keys for whichever device's Agentman is shown.
+  const { loadNotes, loadKeys, supported: managerSupported } = manager;
+  useEffect(() => {
+    if (!managerSupported) return;
+    void loadNotes();
+    void loadKeys();
+  }, [managerSupported, loadNotes, loadKeys, managerHost?.id]);
+
+  const openAgentmanSetting = (path: string) => {
+    if (managerHost && managerHost.id !== fleet.active) fleet.select(managerHost.id);
+    router.push(path as never);
+  };
+
+  const pushActiveCount = fleet.hosts.filter((host) => host.store.pushActive).length;
+  const pushSummary = multiDevice
+    ? pushActiveCount === fleet.hosts.length
+      ? "On — your paired computers can reach you when the app is closed"
+      : pushActiveCount > 0
+        ? `On for ${pushActiveCount} of ${fleet.hosts.length} devices`
+        : pushFailureReason() || "Unavailable in this build"
+    : store.pushActive
+      ? "On — your Mac can reach you when the app is closed"
+      : pushFailureReason() || "Unavailable in this build";
+
+  const alertSummary = multiDevice ? fleetNotifySummary(fleet.hosts.map((host) => host.store.notifyPrefs)) : notifySummary(store.notifyPrefs);
+
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xl }}>
@@ -81,20 +107,41 @@ export default function Settings() {
             <Text style={styles.sectionLabel}>Connection</Text>
             <View style={styles.card}>
               <LinkRow icon="monitor" label="Devices" value={String(fleet.hosts.length)} onPress={() => router.push("/devices")} />
-              <View style={styles.divider} />
-              <Row label="Relay" value={store.credentials?.relayUrl ?? "—"} mono />
-              <View style={styles.divider} />
-              <Row
-                label={deviceLabel}
-                value={
-                  store.daemonOnline
-                    ? "Online"
-                    : store.lastSeenAt
-                      ? `Offline · last seen ${ago(store.lastSeenAt)} ago`
-                      : "Offline"
-                }
-                status={store.daemonOnline ? "online" : "offline"}
-              />
+              {multiDevice ? (
+                fleet.hosts.map((host, index) => (
+                  <View key={host.id}>
+                    <View style={styles.divider} />
+                    <Row
+                      label={hostName(host, index)}
+                      value={
+                        host.store.daemonOnline
+                          ? "Online"
+                          : host.store.lastSeenAt
+                            ? `Offline · last seen ${ago(host.store.lastSeenAt)} ago`
+                            : "Offline"
+                      }
+                      status={host.store.daemonOnline ? "online" : "offline"}
+                    />
+                  </View>
+                ))
+              ) : (
+                <>
+                  <View style={styles.divider} />
+                  <Row label="Relay" value={store.credentials?.relayUrl ?? "—"} mono />
+                  <View style={styles.divider} />
+                  <Row
+                    label="Your Mac"
+                    value={
+                      store.daemonOnline
+                        ? "Online"
+                        : store.lastSeenAt
+                          ? `Offline · last seen ${ago(store.lastSeenAt)} ago`
+                          : "Offline"
+                    }
+                    status={store.daemonOnline ? "online" : "offline"}
+                  />
+                </>
+              )}
               <View style={styles.divider} />
               {/* Push either works or it does not, and when it does not the
                   app has the reason. Withholding it turns a one-line fix into
@@ -104,11 +151,7 @@ export default function Settings() {
                   "Your Mac" above is what green is for on this screen. */}
               <Row
                 label="Background alerts"
-                value={
-                  store.pushActive
-                    ? "On — your Mac can reach you when the app is closed"
-                    : pushFailureReason() || "Unavailable in this build"
-                }
+                value={pushSummary}
               />
             </View>
           </Appear>
@@ -120,12 +163,12 @@ export default function Settings() {
               style={[styles.card, styles.linkRow]}
               pressedScale={0.99}
               accessibilityRole="button"
-              accessibilityLabel={`Notifications: ${notifySummary(store.notifyPrefs)}`}
+              accessibilityLabel={`Notifications: ${alertSummary}`}
             >
               <Text style={styles.rowLabel}>Alerts</Text>
               <View style={styles.valueWrap}>
                 <Text style={styles.rowValue} numberOfLines={1}>
-                  {notifySummary(store.notifyPrefs)}
+                  {alertSummary}
                 </Text>
                 <Feather name="chevron-right" size={16} color={color.faint} />
               </View>
@@ -139,24 +182,34 @@ export default function Settings() {
             </View>
           </Appear>
 
-          {manager.supported ? (
+          {managerSupported ? (
             <Appear delay={18}>
-              <Text style={styles.sectionLabel}>Agentman</Text>
+              <Text style={styles.sectionLabel}>
+                {managerHosts.length === 1 && managerDeviceName ? `Agentman · ${managerDeviceName}` : "Agentman"}
+              </Text>
+              {managerHosts.length > 1 && managerHost ? (
+                <DevicePicker
+                  hosts={managerHosts}
+                  value={managerHost.id}
+                  onChange={(id) => fleet.select(id)}
+                  compact
+                />
+              ) : null}
               <View style={styles.card}>
                 <LinkRow icon="cpu" label="Models" value={manager.settings ? modelName(manager.settings.chatModel) : undefined}
-                  onPress={() => router.push("/agentman-settings/models")} />
+                  onPress={() => openAgentmanSetting("/agentman-settings/models")} />
                 <View style={styles.divider} />
-                <LinkRow icon="message-circle" label="Personality" onPress={() => router.push("/agentman-settings/personality")} />
+                <LinkRow icon="message-circle" label="Personality" onPress={() => openAgentmanSetting("/agentman-settings/personality")} />
                 <View style={styles.divider} />
                 <LinkRow icon="shield" label="Permissions"
                   value={manager.settings ? (manager.settings.autoApprove ? "Approves low-risk" : "Asks every time") : undefined}
-                  onPress={() => router.push("/agentman-settings/permissions")} />
+                  onPress={() => openAgentmanSetting("/agentman-settings/permissions")} />
                 <View style={styles.divider} />
                 <LinkRow icon="book-open" label="Notes" value={manager.notes.length ? String(manager.notes.length) : undefined}
-                  onPress={() => router.push("/agentman-settings/notes")} />
+                  onPress={() => openAgentmanSetting("/agentman-settings/notes")} />
                 <View style={styles.divider} />
                 <LinkRow icon="key" label="Keys" value={manager.keys.length ? String(manager.keys.length) : undefined}
-                  onPress={() => router.push("/agentman-settings/keys")} />
+                  onPress={() => openAgentmanSetting("/agentman-settings/keys")} />
               </View>
             </Appear>
           ) : null}
@@ -170,13 +223,29 @@ export default function Settings() {
                 behind={Boolean(updates.app)}
                 onPress={() => router.push("/update?kind=app")}
               />
-              <View style={styles.divider} />
-              <VersionRow
-                label={deviceLabel}
-                value={macSummary(updates.daemonInfo)}
-                behind={Boolean(updates.mac)}
-                onPress={() => router.push("/update?kind=mac")}
-              />
+              {multiDevice ? (
+                fleet.hosts.map((host, index) => (
+                  <View key={host.id}>
+                    <View style={styles.divider} />
+                    <VersionRow
+                      label={hostName(host, index)}
+                      value={macSummary(host.store.daemonInfo)}
+                      behind={Boolean(updates.macFor(host.id))}
+                      onPress={() => router.push(`/update?kind=mac&device=${encodeURIComponent(host.id)}`)}
+                    />
+                  </View>
+                ))
+              ) : (
+                <>
+                  <View style={styles.divider} />
+                  <VersionRow
+                    label="Your Mac"
+                    value={macSummary(updates.daemonInfo)}
+                    behind={Boolean(updates.mac)}
+                    onPress={() => router.push("/update?kind=mac")}
+                  />
+                </>
+              )}
             </View>
           </Appear>
 
@@ -264,6 +333,12 @@ function notifySummary(prefs: NotifyPrefs): string {
   if (prefs.needsYou) return "Only when needed";
   if (prefs.finished) return "Only when finished";
   return "Off";
+}
+
+function fleetNotifySummary(list: readonly NotifyPrefs[]): string {
+  if (list.length === 0) return "Off";
+  const first = notifySummary(list[0]);
+  return list.every((item) => notifySummary(item) === first) ? first : "Custom by device";
 }
 
 /** A version, which opens what is new when there is something newer. */

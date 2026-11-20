@@ -272,17 +272,18 @@ export default function Agents() {
   // A newer app or Mac is offered here, on the board, once per version: never
   // over a session someone is reading, not before the board has drawn, and
   // not twice in one launch, so the two never arrive back to back.
-  const { pending } = useUpdates();
+  const { pending, outdatedDevice } = useUpdates();
   const paired = namedHosts.length > 0 || Boolean(activeStore.credentials);
   useFocusEffect(
     useCallback(() => {
       if (!pending || !paired || promptedThisLaunch) return;
       const timer = setTimeout(() => {
         promptedThisLaunch = true;
-        router.push(`/update?kind=${pending}`);
+        const device = pending === "mac" && outdatedDevice ? `&device=${encodeURIComponent(outdatedDevice.id)}` : "";
+        router.push(`/update?kind=${pending}${device}`);
       }, 1200);
       return () => clearTimeout(timer);
-    }, [pending, paired, router]),
+    }, [pending, outdatedDevice, paired, router]),
   );
 
   if (!activeStore.ready) return <View style={styles.page} />;

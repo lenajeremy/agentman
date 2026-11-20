@@ -152,7 +152,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       },
       trigger: null,
     }).catch(() => {});
-  }, []);
+  }, [deviceId]);
   // A new conversation, started here or on the Mac, is read afresh.
   const reloadRef = useRef<() => Promise<void>>(async () => {});
 
@@ -165,7 +165,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
         setLastRead(Number.isFinite(value) ? value : Date.now());
       })
       .catch(() => setLastRead(Date.now()));
-  }, []);
+  }, [readKey]);
 
   const apply = useCallback((event: DaemonEvent) => {
     switch (event.type) {
@@ -271,7 +271,7 @@ export function ManagerProvider({ children }: { children: ReactNode }) {
       void AsyncStorage.setItem(readKey, String(latest)).catch(() => {});
       return latest;
     });
-  }, []);
+  }, [readKey]);
 
   const value = useMemo<Manager>(() => ({
     entries,

@@ -543,7 +543,7 @@ export function StoreProvider({ children, credentials, signIn, signOut }: {
         setNotifyPrefsState(prefs);
       })
       .catch(() => {});
-  }, []);
+  }, [scope]);
 
   const registerPushToken = useCallback((client: Client) => {
     if (!pushToken.current) return;
@@ -1093,7 +1093,7 @@ export function StoreProvider({ children, credentials, signIn, signOut }: {
   // Restore what the user hid before the app was last closed.
   useEffect(() => {
     void loadDismissals(scope).then(setDismissals);
-  }, []);
+  }, [scope]);
 
   // A phone spends most of its life asleep. Reconnect the moment it wakes,
   // rather than waiting out a backoff the user is watching.

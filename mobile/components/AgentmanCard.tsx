@@ -54,7 +54,7 @@ export function AgentmanCard({
     <MotionPressable
       onPress={() => {
         onSelect?.();
-        router.push("/agentman");
+        router.push(host ? { pathname: "/agentman", params: { device: host.id } } : "/agentman");
       }}
       style={[styles.card, stacked && styles.cardStacked]}
       pressedScale={0.985}

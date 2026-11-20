@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, Platform } from "react-native";
 
 import type { DaemonInfo } from "./protocol";
+import { hostName, useFleet } from "./fleet";
 import { useStore } from "./store";
 import {
   APP_VERSION_URL,
@@ -22,12 +23,23 @@ import {
 const RELEASE_KEY = "agentman.appRelease.v1";
 const PROMPTED_KEY = "agentman.updatePrompted.v1";
 
+export interface OutdatedDevice {
+  id: string;
+  name: string;
+  update: MacUpdate;
+  daemonInfo: DaemonInfo;
+}
+
 interface Updates {
   /** This app's version and build, as built. */
   appVersion: string;
   appBuild: number;
   app: AppUpdate | null;
   mac: MacUpdate | null;
+  /** First paired computer with an update available (preferring the active one). */
+  outdatedDevice: OutdatedDevice | null;
+  /** Update details for a specific paired computer, if it is behind. */
+  macFor(hostId: string): MacUpdate | null;
   daemonInfo: DaemonInfo | null;
   /** The prompt the board should show next, if any. */
   pending: PromptKind | null;
@@ -52,11 +64,47 @@ function builtAs(): { version: string; build: number } {
 }
 
 export function UpdatesProvider({ children }: { children: React.ReactNode }) {
+  const fleet = useFleet();
   const { daemonInfo } = useStore();
   const [{ version: appVersion, build: appBuild }] = useState(builtAs);
   const [release, setRelease] = useState<AppRelease | null>(null);
   const [prompted, setPrompted] = useState<Prompted | null>(null);
   const fetchedAt = useRef(0);
+
+  const outdatedDevice = useMemo<OutdatedDevice | null>(() => {
+    const activeIndex = fleet.hosts.findIndex((host) => host.id === fleet.active);
+    const activeHost = activeIndex >= 0 ? fleet.hosts[activeIndex] : undefined;
+    if (activeHost?.store.daemonInfo) {
+      const update = macUpdate(activeHost.store.daemonInfo);
+      if (update) {
+        return {
+          id: activeHost.id,
+          name: hostName(activeHost, activeIndex),
+          update,
+          daemonInfo: activeHost.store.daemonInfo,
+        };
+      }
+    }
+    for (let i = 0; i < fleet.hosts.length; i += 1) {
+      const host = fleet.hosts[i];
+      if (!host.store.daemonInfo) continue;
+      const update = macUpdate(host.store.daemonInfo);
+      if (update) {
+        return {
+          id: host.id,
+          name: hostName(host, i),
+          update,
+          daemonInfo: host.store.daemonInfo,
+        };
+      }
+    }
+    return null;
+  }, [fleet.hosts, fleet.active]);
+
+  const macFor = useCallback((hostId: string): MacUpdate | null => {
+    const host = fleet.hosts.find((item) => item.id === hostId);
+    return macUpdate(host?.store.daemonInfo);
+  }, [fleet.hosts]);
 
   // What was known last time, so Settings can say something before the
   // first fetch, or without a connection at all.
@@ -104,29 +152,31 @@ export function UpdatesProvider({ children }: { children: React.ReactNode }) {
         const build = appUpdate(appBuild, release)?.latest.build;
         if (build) next.app = build;
       } else {
-        const latest = macUpdate(daemonInfo)?.latest;
+        const latest = outdatedDevice?.update.latest ?? macUpdate(daemonInfo)?.latest;
         if (latest) next.mac = latest;
       }
       void AsyncStorage.setItem(PROMPTED_KEY, JSON.stringify(next)).catch(() => {});
       return next;
     });
-  }, [appBuild, release, daemonInfo]);
+  }, [appBuild, release, daemonInfo, outdatedDevice]);
 
   const value = useMemo<Updates>(() => {
     const app = appUpdate(appBuild, release);
-    const mac = macUpdate(daemonInfo);
+    const mac = outdatedDevice?.update ?? macUpdate(daemonInfo);
     return {
       appVersion,
       appBuild,
       app,
       mac,
+      outdatedDevice,
+      macFor,
       daemonInfo,
       // Until the record of past prompts has loaded, nothing is pending:
       // guessing would offer a version twice.
       pending: prompted ? nextPrompt(app, mac, prompted) : null,
       markPrompted,
     };
-  }, [appVersion, appBuild, release, daemonInfo, prompted, markPrompted]);
+  }, [appVersion, appBuild, release, daemonInfo, outdatedDevice, macFor, prompted, markPrompted]);
 
   return <UpdatesContext.Provider value={value}>{children}</UpdatesContext.Provider>;
 }

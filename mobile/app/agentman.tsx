@@ -1,5 +1,5 @@
 import Feather from "@expo/vector-icons/Feather";
-import { useFocusEffect, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -29,6 +29,7 @@ import { SeenImage } from "../components/SeenImage";
 import { Thinking } from "../components/Thinking";
 import { VoiceButton } from "../components/VoiceButton";
 import { useStyles, useTheme } from "../lib/appearance";
+import { hostName, useFleet } from "../lib/fleet";
 import { useManager } from "../lib/manager";
 import { chatItems, type ChatItem } from "../lib/manager-feed";
 import { MANAGER_MODELS, modelName } from "../lib/manager-models";
@@ -46,13 +47,29 @@ import { StickerOnDots, edged, heading } from "../components/Brand";
  * doing, read what happened, and answer what needs you. The same
  * conversation the Mac shows.
  */
-export default function AgentmanScreen() {
+export default function AgentmanRoute() {
+  const { device } = useLocalSearchParams<{ device?: string }>();
+  const { active, hosts, select } = useFleet();
+  const paired = !!device && hosts.some((host) => host.id === device);
+  useFocusEffect(useCallback(() => {
+    if (device && paired && device !== active) select(device);
+  }, [device, paired, active, select]));
+  if (device && !paired) return <Redirect href="/" />;
+  if (device && device !== active) return null;
+  return <AgentmanScreen key={active} />;
+}
+
+function AgentmanScreen() {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const fleet = useFleet();
   const store = useStore();
   const manager = useManager();
+  const activeIndex = Math.max(0, fleet.hosts.findIndex((host) => host.id === fleet.active));
+  const activeHost = fleet.hosts[activeIndex];
+  const deviceLabel = fleet.hosts.length > 1 && activeHost ? hostName(activeHost, activeIndex) : null;
   const images = useAttachments(store.credentials);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -150,7 +167,11 @@ export default function AgentmanScreen() {
         <View style={styles.headerBody}>
           <Text style={styles.title}>Agentman</Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {!reachable ? "Waiting for your Mac" : manager.thinking ? "Thinking…" : "Manages your agents"}
+            {!reachable
+              ? deviceLabel ? `Waiting for ${deviceLabel}` : "Waiting for your Mac"
+              : manager.thinking
+                ? deviceLabel ? `${deviceLabel} · Thinking…` : "Thinking…"
+                : deviceLabel ?? "Manages your agents"}
           </Text>
         </View>
         {manager.entries.length > 0 ? (
@@ -459,6 +480,7 @@ function ImageActivity({ entry }: { entry: ManagerEntry }) {
 function BriefCard({ entry }: { entry: ManagerEntry }) {
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
+  const { active } = useFleet();
   const store = useStore();
   const manager = useManager();
   const router = useRouter();
@@ -468,7 +490,7 @@ function BriefCard({ entry }: { entry: ManagerEntry }) {
   return (
     <SwipeToDismiss onDismiss={() => void manager.close(entry)} accessibilityLabel={`News about ${name}`}>
       <MotionPressable
-        onPress={() => session && router.push(`/session/${encodeURIComponent(session.id)}`)}
+        onPress={() => session && router.push({ pathname: "/session/[id]", params: { id: session.id, ...(active ? { device: active } : {}) } })}
         disabled={!session}
         style={styles.brief}
         pressedScale={0.99}

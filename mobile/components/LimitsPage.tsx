@@ -1,15 +1,16 @@
+import Feather from "@expo/vector-icons/Feather";
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { AgentIcon } from "./AgentIcon";
 import { useStyles, useTheme } from "../lib/appearance";
 import {
-  checkedLabel, evenLeft, leftPercent, LIMITS_FOOTNOTE, orderedWindows, pace, PACE_TITLE, resetsLabel,
+  checkedLabel, type DeviceLimits, evenLeft, leftPercent, limitsFootnote, orderedWindows, pace, PACE_TITLE, resetsLabel, visibleDeviceLimits,
 } from "../lib/limits";
 import type { AgentLimits, Limits, LimitWindow } from "../lib/protocol";
 import { agentLabel, font, type Palette, radius, scaled, size, space } from "../lib/theme";
 import { agentColor } from "../lib/usage";
-import { edged, heading } from "./Brand";
+import { edged, eyebrow, heading } from "./Brand";
 
 /**
  * What is left of each agent's plan, as the Mac's Limits tab shows it: for
@@ -18,7 +19,15 @@ import { edged, heading } from "./Brand";
  * resets. The numbers are each agent's own: Claude Code's /usage, Codex's
  * /status.
  */
-export function LimitsPage({ limits, now: fixed }: { limits: Limits; now?: number }) {
+export function LimitsPage({
+  limits,
+  now: fixed,
+  multiDevice = false,
+}: {
+  limits: Limits;
+  now?: number;
+  multiDevice?: boolean;
+}) {
   const styles = useStyles(makeStyles);
   // The resets count down while the page is open.
   const [ticking, setTicking] = useState(() => Date.now());
@@ -28,31 +37,81 @@ export function LimitsPage({ limits, now: fixed }: { limits: Limits; now?: numbe
     return () => clearInterval(timer);
   }, [fixed]);
   const now = fixed ?? ticking;
+  const footnote = limitsFootnote(multiDevice);
 
   if (limits.agents.length === 0) {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyTitle}>No plan limits to show</Text>
-        <Text style={styles.note}>{LIMITS_FOOTNOTE}</Text>
+        <Text style={styles.note}>{footnote}</Text>
       </View>
     );
   }
   return (
     <View>
       {limits.agents.map((agent) => <AgentSection key={agent.kind} agent={agent} now={now} />)}
-      <Text style={styles.footnote}>{LIMITS_FOOTNOTE}</Text>
+      <Text style={styles.footnote}>{footnote}</Text>
     </View>
   );
 }
 
-function AgentSection({ agent, now }: { agent: AgentLimits; now: number }) {
+/**
+ * Plan limits across multiple paired computers, grouped under each computer
+ * that reported quotas so plans from different machines stay clearly separated.
+ */
+export function MultiDeviceLimitsPage({
+  entries,
+  now: fixed,
+}: {
+  entries: readonly DeviceLimits[];
+  now?: number;
+}) {
+  const styles = useStyles(makeStyles);
+  const { color } = useTheme();
+  const [ticking, setTicking] = useState(() => Date.now());
+  useEffect(() => {
+    if (fixed !== undefined) return;
+    const timer = setInterval(() => setTicking(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [fixed]);
+  const now = fixed ?? ticking;
+  const visible = visibleDeviceLimits(entries);
+  const footnote = limitsFootnote(true);
+
+  if (visible.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyTitle}>No plan limits to show</Text>
+        <Text style={styles.note}>{footnote}</Text>
+      </View>
+    );
+  }
+  return (
+    <View>
+      {visible.map((entry, index) => (
+        <View key={entry.hostId} style={index > 0 ? styles.deviceGroupSpaced : styles.deviceGroup}>
+          <View style={styles.deviceHead}>
+            <Feather name="monitor" size={13} color={color.muted} />
+            <Text style={styles.deviceName} numberOfLines={1}>{entry.deviceName}</Text>
+          </View>
+          {entry.limits.agents.map((agent) => (
+            <AgentSection key={`${entry.hostId}:${agent.kind}`} agent={agent} now={now} compactTop={entry.limits.agents[0]?.kind === agent.kind} />
+          ))}
+        </View>
+      ))}
+      <Text style={styles.footnote}>{footnote}</Text>
+    </View>
+  );
+}
+
+function AgentSection({ agent, now, compactTop = false }: { agent: AgentLimits; now: number; compactTop?: boolean }) {
   const styles = useStyles(makeStyles);
   const { scheme } = useTheme();
   const windows = orderedWindows(agent.windows ?? []);
   const tint = agentColor(agent.kind, scheme === "dark");
   return (
     <View>
-      <View style={styles.head}>
+      <View style={[styles.head, compactTop && styles.headCompact]}>
         <AgentIcon kind={agent.kind} size={16} />
         <Text style={styles.agentName} numberOfLines={1}>{agentLabel(agent.kind).name}</Text>
         {agent.plan ? <Text style={styles.plan}>{agent.plan}</Text> : null}
@@ -105,7 +164,12 @@ function WindowRow({ window, tint, now }: { window: LimitWindow; tint: string; n
 
 const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
+    deviceGroup: { marginTop: space.lg },
+    deviceGroupSpaced: { marginTop: space.xxl, paddingTop: space.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    deviceHead: { flexDirection: "row", alignItems: "center", gap: 6, marginHorizontal: space.xxs, marginBottom: space.xs },
+    deviceName: { ...eyebrow(c), flexShrink: 1 },
     head: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: space.xl, marginBottom: space.sm, marginHorizontal: space.xxs },
+    headCompact: { marginTop: space.sm },
     agentName: { ...heading(c, size.body), flexShrink: 1 },
     plan: {
       ...font.sansMedium, fontSize: size.label, color: c.textSecondary, backgroundColor: c.fill,
@@ -133,7 +197,12 @@ const makeSiteStyles = (c: Palette) =>
 
 const makeClassicStyles = (c: Palette) =>
   StyleSheet.create({
+    deviceGroup: { marginTop: space.lg },
+    deviceGroupSpaced: { marginTop: space.xxl, paddingTop: space.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    deviceHead: { flexDirection: "row", alignItems: "center", gap: 6, marginHorizontal: space.xxs, marginBottom: space.xs },
+    deviceName: { ...font.sansBold, fontSize: size.caption, color: c.muted, flexShrink: 1 },
     head: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: space.xl, marginBottom: space.sm, marginHorizontal: space.xxs },
+    headCompact: { marginTop: space.sm },
     agentName: { ...font.sansBold, fontSize: size.body, color: c.text, flexShrink: 1 },
     plan: {
       ...font.sansMedium, fontSize: size.label, color: c.textSecondary, backgroundColor: c.fill,

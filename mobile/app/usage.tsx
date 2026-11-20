@@ -1,101 +1,321 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import Svg, { G, Line, Path, Text as SvgText } from "react-native-svg";
 
 import { AgentIcon } from "../components/AgentIcon";
-import { LimitsPage } from "../components/LimitsPage";
+import { edged, eyebrow } from "../components/Brand";
+import { ALL_DEVICES, DevicePicker } from "../components/DevicePicker";
+import { LimitsPage, MultiDeviceLimitsPage } from "../components/LimitsPage";
 import { Loader } from "../components/Loader";
 import { MotionPressable } from "../components/MotionPressable";
 import { Section, Segmented, SettingsPage } from "../components/SettingsKit";
 import { useStyles, useTheme } from "../lib/appearance";
+import { hostName, useFleet } from "../lib/fleet";
+import type { DeviceLimits } from "../lib/limits";
 import type { Limits, Usage, UsageAgent } from "../lib/protocol";
 import { useStore } from "../lib/store";
 import { agentLabel, font, Palette, radius, scaled, size, space } from "../lib/theme";
 import {
-  agentColor, axisLabel, axisMoney, bucketValue, credits, creditsOnly, CREDITS_NOTE, fraction, kindColors, modelNote,
-  momentLabel, money, monotonePath,
+  agentColor, axisLabel, axisMoney, bucketValue, credits, creditsOnly, CREDITS_NOTE, fraction, hasUsageData, kindColors,
+  mergeUsage, modelNote, momentLabel, money, monotonePath,
   niceAxis, percent, RANGES, rangeTitle, rowLabel, sessions, tokens, unitAdjective, unitNoun, unitOf,
   type Metric,
 } from "../lib/usage";
 
 /**
- * What the agents on the Mac spent, as its usage page shows it: the total,
- * each agent's share, a chart of each day (each hour, week or month), the
- * tokens by kind, and each model's or day's part. Costs are what the API
- * would charge: an estimate, as a subscription doesn't bill per token. The
- * Limits tab shows what is left of each agent's plan instead.
+ * What the agents on your computers spent, as the Mac's usage page shows it:
+ * the total, each agent's share, a chart of each day (each hour, week or
+ * month), the tokens by kind, and each model's or day's part. Costs are what
+ * the API would charge: an estimate, as a subscription doesn't bill per token.
+ * The Limits tab shows what is left of each agent's plan instead.
  */
 
 type Tab = Metric | "limits";
 
-// The range and tab last looked at, kept while the app runs.
+// The range, tab and computer scope last looked at, kept while the app runs.
 let lastDays = 30;
 let lastMetric: Tab = "cost";
+let lastDevice: string = ALL_DEVICES;
 
 export default function UsageScreen() {
-  const store = useStore();
+  const fleet = useFleet();
+  const activeStore = useStore();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  // A link can name the range and tab: /usage?days=90&metric=tokens, or
-  // /usage?metric=limits.
-  const params = useLocalSearchParams<{ days?: string; metric?: string }>();
+  // A link can name the range, tab and computer: /usage?days=90&metric=tokens,
+  // or /usage?metric=limits&device=<id>.
+  const params = useLocalSearchParams<{ days?: string; metric?: string; device?: string }>();
   const linked = Number(params.days);
+  const multiDevice = fleet.hosts.length > 1;
   const [days, setDays] = useState((RANGES as readonly number[]).includes(linked) && params.days !== undefined ? linked : lastDays);
   const [metric, setMetric] = useState<Tab>(
     params.metric === "tokens" || params.metric === "cost" || params.metric === "limits" ? params.metric : lastMetric);
-  const [read, setRead] = useState<Record<number, Usage>>({});
-  const [problem, setProblem] = useState<string | null>(null);
+  const [device, setDevice] = useState<string>(() => {
+    if (params.device && fleet.hosts.some((host) => host.id === params.device)) return params.device;
+    if (multiDevice) {
+      if (lastDevice === ALL_DEVICES || fleet.hosts.some((host) => host.id === lastDevice)) return lastDevice;
+      return ALL_DEVICES;
+    }
+    return fleet.hosts[0]?.id ?? fleet.active;
+  });
+
+  // Keep the chosen computer valid if devices are added or unpaired while open.
+  const effectiveDevice = useMemo(() => {
+    if (!multiDevice) return fleet.hosts[0]?.id ?? fleet.active;
+    if (device === ALL_DEVICES || fleet.hosts.some((host) => host.id === device)) return device;
+    return ALL_DEVICES;
+  }, [multiDevice, device, fleet.hosts, fleet.active]);
+
+  const namedHosts = useMemo(
+    () => fleet.hosts.map((host, index) => ({ host, name: hostName(host, index) })),
+    [fleet.hosts],
+  );
+  const showingAll = multiDevice && effectiveDevice === ALL_DEVICES;
+  const targetHosts = useMemo(
+    () => (showingAll
+      ? namedHosts
+      : namedHosts.filter(({ host }) => host.id === effectiveDevice)),
+    [showingAll, namedHosts, effectiveDevice],
+  );
+
+  // Latest host snapshots in a ref so session_update churn on StoreProvider
+  // never re-fires usage or limits requests.
+  const targetsRef = useRef(targetHosts);
+  targetsRef.current = targetHosts;
+  const activeStoreRef = useRef(activeStore);
+  activeStoreRef.current = activeStore;
+
+  const targetKey = targetHosts.map(({ host }) => host.id).join("\0");
+  const onlineKey = targetHosts.map(({ host }) => `${host.id}:${host.store.daemonOnline ? 1 : 0}`).join("\0");
+
+  // Cached per host id so switching between All and one computer is instant.
+  const [usageByHost, setUsageByHost] = useState<Record<string, Record<number, Usage>>>({});
+  const [usageErrors, setUsageErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const asked = useRef(0);
-  const [limits, setLimits] = useState<Limits | null>(null);
-  const [limitsProblem, setLimitsProblem] = useState<string | null>(null);
+
+  const [limitsByHost, setLimitsByHost] = useState<Record<string, Limits>>({});
+  const [limitsErrors, setLimitsErrors] = useState<Record<string, string>>({});
   const [readingLimits, setReadingLimits] = useState(false);
+  const limitsAsked = useRef(0);
 
   const loadLimits = useCallback(async (force: boolean) => {
+    const ask = ++limitsAsked.current;
+    const targets = targetsRef.current;
     setReadingLimits(true);
     try {
-      setLimits(await store.limits(force));
-      setLimitsProblem(null);
+      if (targets.length === 0) {
+        const result = await activeStoreRef.current.limits(force);
+        if (ask !== limitsAsked.current) return;
+        setLimitsByHost((current) => ({ ...current, "": result }));
+        setLimitsErrors((current) => {
+          const next = { ...current };
+          delete next[""];
+          return next;
+        });
+        return;
+      }
+      const settled = await Promise.allSettled(
+        targets.map(async ({ host }) => ({
+          id: host.id,
+          limits: await host.store.limits(force),
+        })),
+      );
+      if (ask !== limitsAsked.current) return;
+      const nextLimits: Record<string, Limits> = {};
+      const nextErrors: Record<string, string> = {};
+      const cleared: string[] = [];
+      for (let i = 0; i < settled.length; i += 1) {
+        const target = targets[i];
+        const outcome = settled[i];
+        if (outcome.status === "fulfilled") {
+          nextLimits[outcome.value.id] = outcome.value.limits;
+          cleared.push(outcome.value.id);
+        } else {
+          const raw = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+          nextErrors[target.host.id] = target.host.store.daemonOnline
+            ? raw
+            : `${target.name} is offline.`;
+        }
+      }
+      if (Object.keys(nextLimits).length > 0) {
+        setLimitsByHost((current) => ({ ...current, ...nextLimits }));
+      }
+      setLimitsErrors((current) => {
+        const next = { ...current };
+        for (const id of cleared) delete next[id];
+        return { ...next, ...nextErrors };
+      });
     } catch (error) {
-      setLimitsProblem(error instanceof Error ? error.message : String(error));
+      if (ask === limitsAsked.current) {
+        setLimitsErrors((current) => ({
+          ...current,
+          "": error instanceof Error ? error.message : String(error),
+        }));
+      }
     } finally {
-      setReadingLimits(false);
+      if (ask === limitsAsked.current) setReadingLimits(false);
     }
-  }, [store]);
+  }, []);
 
-  // Read when the Limits tab is opened, and only then (or on refresh):
-  // reading Claude's means the Mac starting Claude Code, which nobody should
-  // pay for while looking at something else. A tab opened again within two
-  // minutes gets the Mac's last read.
+  // Read when the Limits tab is opened, and only then (or on refresh / device
+  // change / reconnect): reading Claude's or Antigravity's starts the CLI,
+  // which nobody should pay for while looking at something else.
   useEffect(() => {
     if (metric === "limits") void loadLimits(false);
-  }, [metric, loadLimits]);
+  }, [metric, targetKey, onlineKey, loadLimits]);
 
   const load = useCallback(async (range: number) => {
     const ask = ++asked.current;
+    const targets = targetsRef.current;
     setLoading(true);
     try {
-      const usage = await store.usage(range);
-      setRead((current) => ({ ...current, [range]: usage }));
-      if (ask === asked.current) setProblem(null);
+      if (targets.length === 0) {
+        const summary = await activeStoreRef.current.usage(range);
+        if (ask !== asked.current) return;
+        setUsageByHost((current) => ({
+          ...current,
+          "": { ...(current[""] ?? {}), [range]: summary },
+        }));
+        setUsageErrors((current) => {
+          const next = { ...current };
+          delete next[""];
+          return next;
+        });
+        return;
+      }
+      const settled = await Promise.allSettled(
+        targets.map(async ({ host }) => ({
+          id: host.id,
+          usage: await host.store.usage(range),
+        })),
+      );
+      if (ask !== asked.current) return;
+      const updates: Record<string, Usage> = {};
+      const nextErrors: Record<string, string> = {};
+      const cleared: string[] = [];
+      for (let i = 0; i < settled.length; i += 1) {
+        const target = targets[i];
+        const outcome = settled[i];
+        if (outcome.status === "fulfilled") {
+          updates[outcome.value.id] = outcome.value.usage;
+          cleared.push(outcome.value.id);
+        } else {
+          const raw = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+          nextErrors[target.host.id] = target.host.store.daemonOnline
+            ? raw
+            : `${target.name} is offline.`;
+        }
+      }
+      if (Object.keys(updates).length > 0) {
+        setUsageByHost((current) => {
+          const next = { ...current };
+          for (const [id, summary] of Object.entries(updates)) {
+            next[id] = { ...(next[id] ?? {}), [range]: summary };
+          }
+          return next;
+        });
+      }
+      setUsageErrors((current) => {
+        const next = { ...current };
+        for (const id of cleared) delete next[id];
+        return { ...next, ...nextErrors };
+      });
     } catch (error) {
-      if (ask === asked.current) setProblem(error instanceof Error ? error.message : String(error));
+      if (ask === asked.current) {
+        setUsageErrors((current) => ({
+          ...current,
+          "": error instanceof Error ? error.message : String(error),
+        }));
+      }
     } finally {
       if (ask === asked.current) setLoading(false);
     }
-  }, [store]);
+  }, []);
 
   useEffect(() => {
     lastDays = days;
     void load(days);
-  }, [days, load]);
+  }, [days, targetKey, onlineKey, load]);
   useEffect(() => { lastMetric = metric; }, [metric]);
+  useEffect(() => {
+    if (multiDevice) lastDevice = effectiveDevice;
+  }, [multiDevice, effectiveDevice]);
 
-  const usage = read[days];
+  const singleHost = !showingAll ? targetHosts[0] : undefined;
+  const usage = useMemo(() => {
+    if (targetHosts.length === 0) return usageByHost[""]?.[days];
+    const items = targetHosts
+      .map(({ host }) => usageByHost[host.id]?.[days])
+      .filter((item): item is Usage => Boolean(item));
+    if (items.length === 0) return undefined;
+    return items.length === 1 ? items[0] : mergeUsage(items);
+  }, [targetHosts, usageByHost, days]);
+
+  const missingUsageNotes = useMemo(() => {
+    if (!showingAll) return [];
+    return targetHosts.flatMap(({ host, name }) => {
+      if (usageByHost[host.id]?.[days]) return [];
+      const err = usageErrors[host.id];
+      if (!host.store.daemonOnline) return [`${name} is offline`];
+      if (err) return [`${name} couldn't be read`];
+      return [];
+    });
+  }, [showingAll, targetHosts, usageByHost, usageErrors, days]);
+
+  const usageProblem = useMemo(() => {
+    if (usage) return null;
+    if (targetHosts.length === 0) return usageErrors[""] ?? null;
+    const errors = targetHosts
+      .map(({ host }) => usageErrors[host.id])
+      .filter((item): item is string => Boolean(item));
+    if (errors.length === 0) return null;
+    return showingAll && errors.length > 1
+      ? "None of your paired computers could be reached right now."
+      : errors[0];
+  }, [usage, targetHosts, usageErrors, showingAll]);
+
+  const deviceLimits = useMemo<DeviceLimits[]>(() => {
+    if (targetHosts.length === 0) {
+      const only = limitsByHost[""];
+      return only ? [{ hostId: "", deviceName: "Your Mac", limits: only }] : [];
+    }
+    return targetHosts.flatMap(({ host, name }) => {
+      const value = limitsByHost[host.id];
+      return value ? [{ hostId: host.id, deviceName: name, limits: value }] : [];
+    });
+  }, [targetHosts, limitsByHost]);
+
+  const missingLimitsNotes = useMemo(() => {
+    if (!showingAll) return [];
+    return targetHosts.flatMap(({ host, name }) => {
+      if (limitsByHost[host.id]) return [];
+      const err = limitsErrors[host.id];
+      if (!host.store.daemonOnline) return [`${name} is offline`];
+      if (err) return [`${name} couldn't be read`];
+      return [];
+    });
+  }, [showingAll, targetHosts, limitsByHost, limitsErrors]);
+
+  const limitsProblem = useMemo(() => {
+    if (deviceLimits.length > 0) return null;
+    if (targetHosts.length === 0) return limitsErrors[""] ?? null;
+    const errors = targetHosts
+      .map(({ host }) => limitsErrors[host.id])
+      .filter((item): item is string => Boolean(item));
+    if (errors.length === 0) return null;
+    return showingAll && errors.length > 1
+      ? "None of your paired computers could be reached right now."
+      : errors[0];
+  }, [deviceLimits.length, targetHosts, limitsErrors, showingAll]);
+
+  const singleLimits = singleHost ? limitsByHost[singleHost.host.id] : deviceLimits[0]?.limits;
   const onLimits = metric === "limits";
+  const hasLoadedContent = onLimits ? deviceLimits.length > 0 : Boolean(usage);
   const busy = onLimits ? readingLimits : loading;
+
   return (
     <SettingsPage
       title="Usage"
@@ -103,10 +323,16 @@ export default function UsageScreen() {
         <MotionPressable onPress={() => void (onLimits ? loadLimits(true) : load(days))} disabled={busy} hitSlop={12}
           pressedScale={0.92} style={styles.iconButton} accessibilityRole="button"
           accessibilityLabel={onLimits ? "Read limits again" : "Read again"}>
-          {busy && (onLimits ? limits : usage) ? <Loader size={9} /> : <Feather name="rotate-cw" size={17} color={color.text} />}
+          {busy && hasLoadedContent ? <Loader size={9} /> : <Feather name="rotate-cw" size={17} color={color.text} />}
         </MotionPressable>
       }
     >
+      <DevicePicker
+        hosts={fleet.hosts}
+        value={effectiveDevice}
+        onChange={setDevice}
+        includeAll
+      />
       <View style={styles.controls}>
         {onLimits ? null : (
           <Segmented options={RANGES.map((range) => ({ value: String(range), label: rangeTitle(range) }))}
@@ -118,7 +344,20 @@ export default function UsageScreen() {
         </View>
       </View>
       {onLimits ? (
-        limits ? <LimitsPage limits={limits} /> : limitsProblem ? (
+        deviceLimits.length > 0 ? (
+          <>
+            {missingLimitsNotes.length > 0 ? (
+              <Text style={[styles.note, styles.partialNote]}>
+                {missingLimitsNotes.join(" · ")}.
+              </Text>
+            ) : null}
+            {showingAll ? (
+              <MultiDeviceLimitsPage entries={deviceLimits} />
+            ) : singleLimits ? (
+              <LimitsPage limits={singleLimits} multiDevice={multiDevice} />
+            ) : null}
+          </>
+        ) : limitsProblem ? (
           <View style={styles.problem}>
             <Text style={styles.note}>{limitsProblem}</Text>
             <MotionPressable onPress={() => void loadLimits(true)} accessibilityRole="button" hitSlop={8}>
@@ -132,12 +371,19 @@ export default function UsageScreen() {
           </View>
         )
       ) : usage ? (
-        usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite + usage.tokens.output === 0
-          ? <Text style={styles.note}>{days === 0 ? "Nothing used yet." : `Nothing used in the past ${days === 1 ? "day" : `${days} days`}.`}</Text>
-          : <UsagePage usage={usage} metric={metric === "tokens" ? "tokens" : "cost"} />
-      ) : problem ? (
+        <>
+          {missingUsageNotes.length > 0 ? (
+            <Text style={[styles.note, styles.partialNote]}>
+              {missingUsageNotes.join(" · ")}.
+            </Text>
+          ) : null}
+          {!hasUsageData(usage)
+            ? <Text style={[styles.note, styles.emptyUsage]}>{days === 0 ? "Nothing used yet." : `Nothing used in the past ${days === 1 ? "day" : `${days} days`}.`}</Text>
+            : <UsagePage usage={usage} metric={metric === "tokens" ? "tokens" : "cost"} />}
+        </>
+      ) : usageProblem ? (
         <View style={styles.problem}>
-          <Text style={styles.note}>{problem}</Text>
+          <Text style={styles.note}>{usageProblem}</Text>
           <MotionPressable onPress={() => void load(days)} accessibilityRole="button" hitSlop={8}>
             <Text style={styles.link}>Try again</Text>
           </MotionPressable>
@@ -471,12 +717,14 @@ function Breakdown({ usage, metric, by, dark }: {
   );
 }
 
-const makeStyles = (c: Palette) =>
+const makeSiteStyles = (c: Palette) =>
   StyleSheet.create({
     iconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
     controls: { gap: space.sm, marginTop: space.md },
     metric: { width: 270 },
     note: { ...font.sans, fontSize: size.caption, color: c.muted, lineHeight: size.caption * 1.4 },
+    partialNote: { marginTop: space.md, marginHorizontal: space.xxs },
+    emptyUsage: { marginTop: space.lg },
     skipped: { marginTop: space.lg },
     link: { ...font.sansMedium, fontSize: size.caption, color: c.workingText, marginTop: space.sm },
     problem: { marginTop: space.xl },
@@ -514,8 +762,8 @@ const makeStyles = (c: Palette) =>
     legendValue: { ...font.sansMedium, fontSize: size.label, color: c.text, fontVariant: ["tabular-nums"] },
     breakdownHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: space.lg, marginBottom: space.xxs },
     breakdownSwitch: { width: 180 },
-    sectionTitle: { ...font.sansBold, fontSize: size.caption, color: c.muted, marginLeft: space.xxs },
-    card: { backgroundColor: c.surface, borderRadius: radius.xl, paddingHorizontal: space.lg, borderWidth: 1, borderColor: c.line },
+    sectionTitle: { ...eyebrow(c), marginLeft: space.xxs },
+    card: { backgroundColor: c.surface, borderRadius: radius.xl, paddingHorizontal: space.lg, ...edged(c, 3), marginBottom: 3 },
     breakdownRow: { flexDirection: "row", alignItems: "center", paddingVertical: space.md, gap: space.sm },
     rank: { ...font.sans, fontSize: size.label, color: c.muted, width: 18, fontVariant: ["tabular-nums"] },
     breakdownMain: { flex: 1, gap: 6, minWidth: 0 },
@@ -528,3 +776,13 @@ const makeStyles = (c: Palette) =>
     breakdownValue: { ...font.sansMedium, fontSize: size.caption, color: c.text, fontVariant: ["tabular-nums"] },
     breakdownDetail: { ...font.sans, fontSize: size.label, color: c.muted, fontVariant: ["tabular-nums"] },
   });
+
+const makeClassicStyles = (c: Palette) =>
+  StyleSheet.create({
+    sectionTitle: { ...font.sansBold, fontSize: size.caption, color: c.muted, marginLeft: space.xxs },
+    card: { backgroundColor: c.surface, borderRadius: radius.xl, paddingHorizontal: space.lg, borderWidth: 1, borderColor: c.line },
+  });
+
+type Styles = ReturnType<typeof makeSiteStyles> & ReturnType<typeof makeClassicStyles>;
+const makeStyles = (c: Palette): Styles =>
+  (c.look === "site" ? makeSiteStyles(c) : { ...makeSiteStyles(c), ...makeClassicStyles(c) }) as Styles;

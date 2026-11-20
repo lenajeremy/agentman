@@ -7,9 +7,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Appear } from "../components/Appear";
 import { ContentColumn } from "../components/ContentColumn";
+import { ALL_DEVICES, DevicePicker } from "../components/DevicePicker";
 import { MotionPressable } from "../components/MotionPressable";
 import { useStyles, useTheme } from "../lib/appearance";
-import { NotifyChoice } from "../lib/notification-prefs";
+import { hostName, useFleet } from "../lib/fleet";
+import { NotifyChoice, type NotifyPrefs } from "../lib/notification-prefs";
 import { pushFailureReason } from "../lib/push";
 import { useStore } from "../lib/store";
 import { font, Palette, radius, size, space, scaled } from "../lib/theme";
@@ -29,12 +31,40 @@ type FeatherName = ComponentProps<typeof Feather>["name"];
  * reason to want a banner over the screen you are already reading.
  */
 export default function NotificationSettings() {
-  const store = useStore();
+  const fleet = useFleet();
+  const activeStore = useStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useStyles(makeStyles);
   const { color } = useTheme();
-  const prefs = store.notifyPrefs;
+  const multiDevice = fleet.hosts.length > 1;
+  const [device, setDevice] = useState<string>(() => (multiDevice ? ALL_DEVICES : (fleet.hosts[0]?.id ?? fleet.active)));
+  const effectiveDevice = multiDevice && (device === ALL_DEVICES || fleet.hosts.some((host) => host.id === device))
+    ? device
+    : multiDevice
+      ? ALL_DEVICES
+      : (fleet.hosts[0]?.id ?? fleet.active);
+  const showingAll = multiDevice && effectiveDevice === ALL_DEVICES;
+  const targetHosts = showingAll
+    ? fleet.hosts
+    : fleet.hosts.filter((host) => host.id === effectiveDevice);
+  const targetIndex = !showingAll ? Math.max(0, fleet.hosts.findIndex((host) => host.id === effectiveDevice)) : 0;
+  const singleHost = !showingAll ? fleet.hosts[targetIndex] : undefined;
+  const singleName = singleHost && multiDevice ? hostName(singleHost, targetIndex) : "Your Mac";
+
+  const prefs: NotifyPrefs = showingAll
+    ? {
+        agentman: targetHosts.every((host) => host.store.notifyPrefs.agentman),
+        needsYou: targetHosts.every((host) => host.store.notifyPrefs.needsYou),
+        finished: targetHosts.every((host) => host.store.notifyPrefs.finished),
+        agents: targetHosts.every((host) => host.store.notifyPrefs.agents),
+      }
+    : (singleHost?.store.notifyPrefs ?? activeStore.notifyPrefs);
+
+  const hasMixedPrefs = showingAll && (["agentman", "needsYou", "finished", "agents"] as NotifyChoice[]).some((key) => {
+    const first = targetHosts[0]?.store.notifyPrefs[key];
+    return targetHosts.some((host) => host.store.notifyPrefs[key] !== first);
+  });
 
   // iOS can switch every alert off for the app, which no choice here can
   // override. Read again whenever the app comes back, since that is where
@@ -54,8 +84,21 @@ export default function NotificationSettings() {
     return () => subscription.remove();
   }, [readPermission]);
 
-  const set = (choice: NotifyChoice, value: boolean) => store.setNotifyPrefs({ ...prefs, [choice]: value });
-  const agentmanOn = store.daemonInfo?.agentman === true;
+  const set = (choice: NotifyChoice, value: boolean) => {
+    if (showingAll) {
+      for (const host of targetHosts) {
+        host.store.setNotifyPrefs({ ...host.store.notifyPrefs, [choice]: value });
+      }
+      return;
+    }
+    const store = singleHost?.store ?? activeStore;
+    store.setNotifyPrefs({ ...store.notifyPrefs, [choice]: value });
+  };
+
+  const agentmanOnCount = targetHosts.filter((host) => host.store.daemonInfo?.agentman === true).length;
+  const pushActiveCount = targetHosts.filter((host) => host.store.pushActive).length;
+  const agentmanOn = showingAll ? agentmanOnCount > 0 : (singleHost?.store ?? activeStore).daemonInfo?.agentman === true;
+  const pushActive = showingAll ? pushActiveCount > 0 : (singleHost?.store ?? activeStore).pushActive;
 
   return (
     <View style={[styles.page, { paddingTop: insets.top }]}>
@@ -80,6 +123,17 @@ export default function NotificationSettings() {
             Agentman only notifies you when the app is closed. While it’s open, you’re already
             looking.
           </Text>
+          <DevicePicker
+            hosts={fleet.hosts}
+            value={effectiveDevice}
+            onChange={setDevice}
+            includeAll
+          />
+          {hasMixedPrefs ? (
+            <Text style={styles.footnote}>
+              Paired computers currently have different alert settings. Changing a toggle below updates all of them.
+            </Text>
+          ) : null}
 
           {allowed === false ? (
             <Appear>
@@ -144,15 +198,28 @@ export default function NotificationSettings() {
               />
             </View>
             <Text style={styles.footnote}>
-              {agentmanOn
-                ? "Agentman is on, so your agents only notify you themselves when you ask."
-                : "Agentman is off, so each agent notifies you itself."}
+              {showingAll
+                ? agentmanOnCount === targetHosts.length
+                  ? "Agentman is on across your devices, so your agents only notify you themselves when you ask."
+                  : agentmanOnCount > 0
+                    ? `Agentman is on on ${agentmanOnCount} of ${targetHosts.length} devices.`
+                    : "Agentman is off, so each agent notifies you itself."
+                : agentmanOn
+                  ? "Agentman is on, so your agents only notify you themselves when you ask."
+                  : "Agentman is off, so each agent notifies you itself."}
             </Text>
             <Text style={styles.footnote}>
-              {store.pushActive
-                ? "Your Mac sends these, so they reach you even when the app has been closed for a while."
-                : pushFailureReason() ||
-                  "Without push, these only arrive while the app is still running in the background."}
+              {showingAll
+                ? pushActiveCount === targetHosts.length
+                  ? "Your paired computers send these, so they reach you even when the app has been closed for a while."
+                  : pushActiveCount > 0
+                    ? `Push is active on ${pushActiveCount} of ${targetHosts.length} devices.`
+                    : pushFailureReason() ||
+                      "Without push, these only arrive while the app is still running in the background."
+                : pushActive
+                  ? `${singleName} sends these, so they reach you even when the app has been closed for a while.`
+                  : pushFailureReason() ||
+                    "Without push, these only arrive while the app is still running in the background."}
             </Text>
           </Appear>
         </ContentColumn>
