@@ -85,8 +85,10 @@ final class AgentsStore {
     /// The folder of the editor the palette is open over; nil over the main
     /// window.
     var paletteEditor: String?
-    /// Unsent messages, by session, kept across launches.
-    private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
+    /// Unsent messages, by session, kept across launches. Kept outside
+    /// Observation: views read it once on appear, and updating it on every
+    /// keystroke shouldn't wake observers.
+    @ObservationIgnored private(set) var drafts: [String: String] = (UserDefaults.standard.dictionary(forKey: "drafts") as? [String: String]) ?? [:]
     @ObservationIgnored private var draftWrite: Task<Void, Never>?
 
     /// Keeps a session's unsent message, or forgets it once empty.

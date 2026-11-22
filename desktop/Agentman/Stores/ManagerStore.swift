@@ -54,6 +54,16 @@ final class ManagerStore {
     /// Internal rather than private so screenshot tests can fill it.
     var images: [String: NSImage] = [:]
     private static let lastReadKey = "managerLastRead"
+    /// Conversation rows, rebuilt only when entries change rather than on
+    /// every redraw while scrolling or typing.
+    @ObservationIgnored private var chatItemCache: (entries: [ManagerEntry], items: [ChatItem])?
+
+    var chatItems: [ChatItem] {
+        if let cached = chatItemCache, cached.entries == entries { return cached.items }
+        let built = ChatItem.items(from: entries)
+        chatItemCache = (entries, built)
+        return built
+    }
 
     init(client: DaemonClient, defaults: UserDefaults = .standard) {
         self.client = client

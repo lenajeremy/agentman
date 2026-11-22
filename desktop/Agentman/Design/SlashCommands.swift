@@ -10,7 +10,11 @@ import SwiftUI
 @MainActor @Observable
 final class SlashCommands {
     /// Everything the agent offers, once asked for.
-    private(set) var commands: [SlashCommand] = []
+    private(set) var commands: [SlashCommand] = [] {
+        didSet { skills = commands.filter { $0.skill == true } }
+    }
+    /// The skills among the commands, cached for the chips a sent message shows.
+    private(set) var skills: [SlashCommand] = []
     /// What is typed after the `/`, while the list is open.
     private(set) var query: String?
     private(set) var results: [SlashCommand] = []
@@ -36,9 +40,6 @@ final class SlashCommands {
     }
 
     var isOpen: Bool { query != nil && (!results.isEmpty || (problem != nil && !skillsOnly)) }
-
-    /// The skills among the commands, for the chips a sent message shows.
-    var skills: [SlashCommand] { commands.filter { $0.skill == true } }
 
     /// Follows the box: open while all it holds is `/` (or a `$` it takes)
     /// and a name being typed.
@@ -90,9 +91,10 @@ final class SlashCommands {
     }
 
     func dismiss() {
-        query = nil
-        results = []
-        selected = 0
+        guard query != nil || !results.isEmpty || selected != 0 || range.location != NSNotFound else { return }
+        if query != nil { query = nil }
+        if !results.isEmpty { results = [] }
+        if selected != 0 { selected = 0 }
         range = NSRange(location: NSNotFound, length: 0)
     }
 

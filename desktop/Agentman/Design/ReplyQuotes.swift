@@ -172,6 +172,7 @@ final class SelectionWatcherView: NSView {
     var offered: (QuoteOffer?) -> Void = { _ in }
     private(set) var offer: QuoteOffer?
     private var monitor: Any?
+    private var selectionObserver: NSObjectProtocol?
 
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -180,10 +181,24 @@ final class SelectionWatcherView: NSView {
         super.viewDidMoveToWindow()
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
+        selectionObserver = nil
         guard window != nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .scrollWheel, .keyDown, .keyUp]) { [weak self] event in
             self?.handle(event)
             return event
+        }
+        selectionObserver = NotificationCenter.default.addObserver(
+            forName: MarkdownTextView.selectionFinishedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let point = (note.userInfo?["point"] as? NSValue)?.pointValue
+            let sourceView = note.object as? NSView
+            MainActor.assumeIsolated {
+                guard let self, self.enabled, let window = self.window, sourceView?.window === window else { return }
+                self.read(near: point)
+            }
         }
     }
 

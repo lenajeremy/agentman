@@ -48,6 +48,8 @@ private struct TaggedTextField: NSViewRepresentable {
     let lineLimit: Int?
     let highlight: FindHighlight?
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> TaggedTextView {
         // TextKit 1, whose attachment cells draw the tags.
         let view = TaggedTextView(usingTextLayoutManager: false)
@@ -63,11 +65,17 @@ private struct TaggedTextField: NSViewRepresentable {
 
     func updateNSView(_ view: TaggedTextView, context: Context) {
         view.folder = folder
-        view.isSelectable = selectable
-        view.textContainer?.maximumNumberOfLines = lineLimit ?? 0
-        view.textContainer?.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
-        let made = attributed
-        if view.shown != made {
+        if view.isSelectable != selectable { view.isSelectable = selectable }
+        let maxLines = lineLimit ?? 0
+        if view.textContainer?.maximumNumberOfLines != maxLines {
+            view.textContainer?.maximumNumberOfLines = maxLines
+        }
+        let breakMode: NSLineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
+        if view.textContainer?.lineBreakMode != breakMode {
+            view.textContainer?.lineBreakMode = breakMode
+        }
+        let made = context.coordinator.attributed(for: self)
+        if view.shown !== made && view.shown != made {
             view.textStorage?.setAttributedString(made)
             view.shown = made
         }
@@ -76,10 +84,55 @@ private struct TaggedTextField: NSViewRepresentable {
     /// As wide as its longest line, up to what is offered, and as tall as
     /// its lines.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: TaggedTextView, context: Context) -> CGSize? {
-        Self.measure(attributed, width: proposal.width ?? 10_000, lines: lineLimit ?? 0)
+        let width = proposal.width ?? 10_000
+        return context.coordinator.size(for: self, width: width)
     }
 
-    private var attributed: NSAttributedString {
+    @MainActor
+    final class Coordinator {
+        private struct ContentKey: Equatable {
+            let text: String
+            let folder: String?
+            let skillLabels: [String]
+            let color: Color
+            let lineSpacing: CGFloat
+            let highlight: FindHighlight?
+        }
+
+        private var key: ContentKey?
+        private var cachedAttributed: NSAttributedString?
+        private var cachedSizes: [Int: CGSize] = [:]
+        private var cachedLineLimit: Int?
+
+        func attributed(for field: TaggedTextField) -> NSAttributedString {
+            let next = ContentKey(text: field.text, folder: field.folder, skillLabels: field.skills.map(\.label),
+                                  color: field.color, lineSpacing: field.lineSpacing, highlight: field.highlight)
+            if let cachedAttributed, key == next { return cachedAttributed }
+            let built = field.buildAttributed()
+            key = next
+            cachedAttributed = built
+            cachedSizes.removeAll(keepingCapacity: true)
+            return built
+        }
+
+        func size(for field: TaggedTextField, width: CGFloat) -> CGSize {
+            let attributed = attributed(for: field)
+            let lines = field.lineLimit ?? 0
+            if cachedLineLimit != lines {
+                cachedLineLimit = lines
+                cachedSizes.removeAll(keepingCapacity: true)
+            }
+            let clamped = width.isFinite ? min(max(width, 1), 100_000) : 10_000
+            let widthKey = Int((clamped * 2).rounded())
+            if let hit = cachedSizes[widthKey] { return hit }
+            let measured = TaggedTextField.measure(attributed, width: clamped, lines: lines)
+            if cachedSizes.count >= 4 { cachedSizes.removeAll(keepingCapacity: true) }
+            cachedSizes[widthKey] = measured
+            return measured
+        }
+    }
+
+    private func buildAttributed() -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
         let attributes: [NSAttributedString.Key: Any] = [

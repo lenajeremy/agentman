@@ -68,18 +68,19 @@ struct MessageField: NSViewRepresentable {
         scroll.hasHorizontalScroller = false
         scroll.scrollerStyle = .overlay
         scroll.documentView = textView
-        update(textView)
+        update(textView, coordinator: context.coordinator)
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
-        update(textView)
+        update(textView, coordinator: context.coordinator)
         if textView.plainText != text {
             textView.string = text
             textView.makeChips(all: true, notify: false)
             textView.needsDisplay = true
+            context.coordinator.textVersion &+= 1
         }
         // Focus follows the binding when it is set from outside, never
         // fighting a click elsewhere.
@@ -92,20 +93,34 @@ struct MessageField: NSViewRepresentable {
         textView.requestAutofocus()
     }
 
-    private func update(_ textView: MessageTextView) {
-        let font = Self.font(fontSize)
+    private static let sharedParagraphStyle: NSParagraphStyle = {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = Self.lineSpacing
-        textView.font = font
-        textView.textColor = NSColor(Palette.text)
-        textView.insertionPointColor = NSColor(Palette.text)
-        textView.defaultParagraphStyle = paragraph
-        textView.typingAttributes = [.font: font, .foregroundColor: NSColor(Palette.text), .paragraphStyle: paragraph]
+        paragraph.lineSpacing = lineSpacing
+        return paragraph
+    }()
+
+    private static let textColor = NSColor(Palette.text)
+
+    private func update(_ textView: MessageTextView, coordinator: Coordinator) {
+        // Only touch font/attributes when font size changes: reassigning them
+        // on every keystroke forces AppKit to re-attribute the entire text storage.
+        if coordinator.lastFontSize != fontSize {
+            coordinator.lastFontSize = fontSize
+            let font = Self.font(fontSize)
+            textView.font = font
+            textView.textColor = Self.textColor
+            textView.insertionPointColor = Self.textColor
+            textView.defaultParagraphStyle = Self.sharedParagraphStyle
+            textView.typingAttributes = [.font: font, .foregroundColor: Self.textColor, .paragraphStyle: Self.sharedParagraphStyle]
+        }
         textView.chatAutofocus = chatAutofocus
         textView.autofocus = autofocus
-        textView.isEditable = enabled
-        textView.placeholder = placeholder
-        textView.setAccessibilityPlaceholderValue(placeholder)
+        if textView.isEditable != enabled { textView.isEditable = enabled }
+        if textView.placeholder != placeholder {
+            textView.placeholder = placeholder
+            textView.setAccessibilityPlaceholderValue(placeholder)
+            if textView.string.isEmpty { textView.needsDisplay = true }
+        }
         textView.onSubmit = onSubmit
         textView.onImages = onImages
         textView.onDropTargeted = onDropTargeted
@@ -124,20 +139,29 @@ struct MessageField: NSViewRepresentable {
     /// loop of layouts that AppKit ends by crashing.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
         let width = max(proposal.width ?? 200, 40)
+        let widthHalfPt = width.isFinite ? Int((min(width, 100_000) * 2).rounded()) : -1
+        let coordinator = context.coordinator
+        if let cached = coordinator.cachedSize,
+           cached.version == coordinator.textVersion,
+           cached.widthHalfPt == widthHalfPt,
+           cached.fontSize == fontSize,
+           cached.maxLines == maxLines {
+            return cached.size
+        }
         let font = Self.font(fontSize)
         let line = ceil(font.ascender - font.descender + font.leading + Self.lineSpacing)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = Self.lineSpacing
         // The text with its file chips, each as wide as it draws.
-        let measured = NSMutableAttributedString(attributedString: context.coordinator.textView?.textStorage ?? NSAttributedString(string: text))
+        let measured = NSMutableAttributedString(attributedString: coordinator.textView?.textStorage ?? NSAttributedString(string: text))
         // A last empty line counts, as the text view shows it.
         if measured.length == 0 || measured.string.hasSuffix("\n") { measured.append(NSAttributedString(string: " ")) }
-        measured.addAttributes([.font: font, .paragraphStyle: paragraph], range: NSRange(location: 0, length: measured.length))
+        measured.addAttributes([.font: font, .paragraphStyle: Self.sharedParagraphStyle], range: NSRange(location: 0, length: measured.length))
         let used = measured.boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         ).height
-        return CGSize(width: width, height: min(max(ceil(used), line), line * CGFloat(maxLines)))
+        let size = CGSize(width: width, height: min(max(ceil(used), line), line * CGFloat(maxLines)))
+        coordinator.cachedSize = (coordinator.textVersion, widthHalfPt, fontSize, maxLines, size)
+        return size
     }
 
     static func font(_ size: CGFloat) -> NSFont {
@@ -149,6 +173,9 @@ struct MessageField: NSViewRepresentable {
         var parent: MessageField
         weak var textView: MessageTextView?
         var lastFocused = false
+        var lastFontSize: CGFloat?
+        var textVersion = 0
+        var cachedSize: (version: Int, widthHalfPt: Int, fontSize: CGFloat, maxLines: Int, size: CGSize)?
         /// Native focus is reported on the next turn, outside SwiftUI's
         /// update. Until then its old binding is not a new focus request.
         var reportingFocus = false
@@ -158,11 +185,17 @@ struct MessageField: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
+            textVersion &+= 1
             parent.text = textView.plainText
             // Once AppKit is done with the change: in the middle of it, the
             // step typing leaves to undo would still count the letters a
             // chip replaced.
-            DispatchQueue.main.async { [weak textView] in textView?.makeChips() }
+            DispatchQueue.main.async { [weak textView, weak self] in
+                guard let textView else { return }
+                let before = textView.textStorage?.length
+                textView.makeChips()
+                if textView.textStorage?.length != before { self?.textVersion &+= 1 }
+            }
             followMention()
             followSlash()
         }
@@ -603,7 +636,8 @@ final class MessageTextView: NSTextView {
             }
         }
         // A skill's name typed in full: the agent's skills, as `/` lists them.
-        if let skills = slash?.skills, !skills.isEmpty {
+        if let skills = slash?.skills, !skills.isEmpty,
+           string.contains("/") || string.contains("$") {
             for found in skillWords(skills) where !typing(found.range) {
                 tags.append((found.range, SkillChip.text(found.command, attributes: attributes)))
             }

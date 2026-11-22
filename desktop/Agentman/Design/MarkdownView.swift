@@ -11,21 +11,27 @@ import UniformTypeIdentifiers
 /// A whole reply: each run of prose one selectable text, so a selection goes
 /// on from one paragraph to the next, and the blocks between them (code,
 /// tables, pictures) on their own.
-struct MarkdownView: View {
-    let blocks: [MarkdownBlock]
+struct MarkdownView: View, Equatable {
     private let source: String
+    private let entry: MarkdownCache.Entry
+
+    var blocks: [MarkdownBlock] { entry.blocks }
 
     init(_ source: String) {
         self.source = source
-        blocks = MarkdownCache.blocks(for: source)
+        entry = MarkdownCache.entry(for: source)
+    }
+
+    nonisolated static func == (lhs: MarkdownView, rhs: MarkdownView) -> Bool {
+        lhs.source == rhs.source
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(Self.segments(blocks)) { segment in
+            ForEach(entry.segments) { segment in
                 switch segment.content {
                 case .prose(let run):
-                    MarkdownProse(blocks: run, key: "\(source.hashValue)-\(segment.id)")
+                    MarkdownProse(blocks: run, key: "\(entry.id)-\(segment.id)")
                 case .block(let block):
                     BlockView(block: block)
                 }
@@ -133,26 +139,40 @@ extension EnvironmentValues {
 /// typed.
 @MainActor
 enum MarkdownCache {
-    private static var recent: [String: [MarkdownBlock]] = [:]
-    private static var older: [String: [MarkdownBlock]] = [:]
+    struct Entry {
+        let id: UInt64
+        let blocks: [MarkdownBlock]
+        let segments: [MarkdownView.Segment]
+    }
+
+    private static var recent: [String: Entry] = [:]
+    private static var older: [String: Entry] = [:]
+    private static var nextId: UInt64 = 1
     /// Replies in each generation: more than a conversation shows at once.
     static let generation = 200
 
-    static func blocks(for source: String) -> [MarkdownBlock] {
+    static func entry(for source: String) -> Entry {
         if let hit = recent[source] { return hit }
-        let blocks: [MarkdownBlock]
+        let entry: Entry
         if let kept = older.removeValue(forKey: source) {
-            blocks = kept
+            entry = kept
         } else {
             var builder = BlockBuilder()
-            blocks = builder.blocks(of: Document(parsing: source))
+            let blocks = builder.blocks(of: Document(parsing: source))
+            let id = nextId
+            nextId &+= 1
+            entry = Entry(id: id, blocks: blocks, segments: MarkdownView.segments(blocks))
         }
         if recent.count >= generation {
             older = recent
             recent = [:]
         }
-        recent[source] = blocks
-        return blocks
+        recent[source] = entry
+        return entry
+    }
+
+    static func blocks(for source: String) -> [MarkdownBlock] {
+        entry(for: source).blocks
     }
 
     /// How many parsed replies are kept, for tests.

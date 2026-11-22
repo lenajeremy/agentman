@@ -279,6 +279,9 @@ final class MarkdownTextTests: XCTestCase {
     }
 
     private static func textViews(in view: NSView) -> [MarkdownTextView] {
-        (view as? MarkdownTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
+        if let surface = view as? MarkdownTextSurface {
+            return [surface.activateTextView()]
+        }
+        return (view as? MarkdownTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
     }
 }

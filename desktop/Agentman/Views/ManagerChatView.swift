@@ -11,9 +11,7 @@ struct ManagerChatView: View {
     var inPanel = false
     @State private var confirmNewChat = false
     @State private var chatAutofocus = ChatAutofocus()
-    @State private var draft = ""
-    @State private var attachments: [Attachment] = []
-    @State private var sending = false
+    @State private var composer = ManagerComposerState()
     @State private var dropping = false
     /// Whether the conversation is scrolled to its end, so new messages
     /// follow on; scrolled up, nothing moves what the user is reading.
@@ -87,100 +85,79 @@ struct ManagerChatView: View {
     private var conversation: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                ScrollViewReader { proxy in
+                if entry {
                     ScrollView(showsIndicators: false) {
-                        let items = ChatItem.items(from: manager.entries)
-                        LazyVStack(alignment: .leading, spacing: 28) {
-                            if manager.hasOlder, !manager.entries.isEmpty {
-                                LoadingEarlier()
-                            }
-                            ForEach(items) { item in
-                                ChatItemView(item: item)
-                                    .id(item.id)
-                                    .firstMessage(item.id, if: item.id == items.first?.id)
-                            }
-                            if manager.thinking, manager.entries.last?.streaming != true {
-                                ThinkingRow()
-                                    .id("thinking")
-                            }
-                            if entry {
-                                EntryHero(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending) {
-                                    send(draft)
+                        ManagerEntrySurface(composer: composer, dropping: $dropping) {
+                            send(composer.draft)
+                        }
+                        // The whole visible height, the title bar's
+                        // too, so it sits in the middle of the page.
+                        .frame(minHeight: geometry.size.height)
+                        .padding(.horizontal, gutter)
+                        .frame(maxWidth: AgentThreadView.column)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .scrollIndicators(.never)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            let items = manager.chatItems
+                            LazyVStack(alignment: .leading, spacing: 28) {
+                                if manager.hasOlder, !manager.entries.isEmpty {
+                                    LoadingEarlier()
                                 }
-                                // The whole visible height, the title bar's
-                                // too, so it sits in the middle of the page.
-                                .frame(minHeight: geometry.size.height)
-                                .id("entry")
-                            } else {
+                                ForEach(items) { item in
+                                    ChatItemView(item: item)
+                                        .id(item.id)
+                                        .firstMessage(item.id, if: item.id == items.first?.id)
+                                }
+                                if manager.thinking, manager.entries.last?.streaming != true {
+                                    ThinkingRow()
+                                        .id("thinking")
+                                }
                                 // The end of the conversation, below the last
                                 // message, so following it keeps room above
                                 // the composer.
                                 Color.clear.frame(height: 1).id("end")
                             }
+                            .padding(.horizontal, gutter)
+                            .padding(.top, 28)
+                            .padding(.bottom, 6)
+                            .frame(maxWidth: AgentThreadView.column)
+                            .frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, gutter)
-                        .padding(.top, entry ? 0 : 28)
-                        .padding(.bottom, entry ? 0 : 6)
-                        .frame(maxWidth: AgentThreadView.column)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .modifier(FollowsEnd(following: following, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
-                    .scrollIndicators(.never)
-                    .offersQuotes(when: store.status == .connected && !manager.needsKey) { text in
-                        quotes.wrappedValue.append(ReplyQuote(text: text))
-                    }
-                    .modifier(TopFade())
-                    .overlay(alignment: .bottom) {
-                        JumpToLatestOverlay(following: following, hidden: entry) {
-                            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+                        .modifier(FollowsEnd(following: following, earlier: manager.hasOlder ? { await manager.loadOlder() } : nil))
+                        .scrollIndicators(.never)
+                        .offersQuotes(when: store.status == .connected && !manager.needsKey) { text in
+                            quotes.wrappedValue.append(ReplyQuote(text: text))
                         }
-                    }
-                    .onChange(of: scrollKey) { old, _ in
-                        guard !entry, following.atEnd else { return }
-                        if old.hasPrefix("0-") {
-                            // The first page: its end is only laid out once
-                            // this update is done, and scrolling to it before
-                            // lands at the top.
-                            DispatchQueue.main.async { proxy.scrollTo("end", anchor: .bottom) }
-                            return
+                        .modifier(TopFade())
+                        .overlay(alignment: .bottom) {
+                            JumpToLatestOverlay(following: following, hidden: false) {
+                                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+                            }
                         }
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            proxy.scrollTo("end", anchor: .bottom)
+                        .onChange(of: scrollKey) { old, _ in
+                            guard following.atEnd else { return }
+                            if old.hasPrefix("0-") {
+                                DispatchQueue.main.async { proxy.scrollTo("end", anchor: .bottom) }
+                                return
+                            }
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                proxy.scrollTo("end", anchor: .bottom)
+                            }
                         }
-                    }
-                    .onChange(of: followRequest) { _, _ in
-                        following.atEnd = true
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            proxy.scrollTo("end", anchor: .bottom)
+                        .onChange(of: followRequest) { _, _ in
+                            following.atEnd = true
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                proxy.scrollTo("end", anchor: .bottom)
+                            }
                         }
                     }
-                }
 
-                if !entry {
-                    VStack(spacing: 8) {
-                        if store.status != .connected || manager.needsKey {
-                            // Agentman can't take a message yet: the box
-                            // says why, as on the entry page.
-                            ManagerBox(draft: $draft, attachments: $attachments, dropping: $dropping, sending: sending) {
-                                send(draft)
-                            }
-                        } else {
-                            ManagerComposer(text: $draft, attachments: $attachments, quotes: quotes, thinking: manager.thinking, sending: sending,
-                                            onDropTargeted: { dropping = $0 }) {
-                                send(draft)
-                            } onStop: {
-                                manager.stop()
-                            }
-                            .modifier(ComposerFeedback(message: manager.problem, radius: 22) {
-                                manager.problem = nil
-                            })
-                        }
+                    ManagerComposerBar(composer: composer, quotes: quotes, dropping: $dropping, gutter: gutter) {
+                        send(composer.draft)
                     }
-                    .padding(.horizontal, gutter)
-                    .padding(.top, 4)
-                    .padding(.bottom, 22)
-                    .frame(maxWidth: AgentThreadView.column)
-                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -188,8 +165,7 @@ struct ManagerChatView: View {
         .onDrop(of: [.fileURL, .image], isTargeted: $dropping) { providers in
             Task { @MainActor in
                 let found = await Attachments.from(providers: providers)
-                let room = Attachments.maxCount - attachments.count
-                attachments.append(contentsOf: found.prefix(max(0, room)))
+                composer.appendAttachments(found)
             }
             return true
         }
@@ -199,11 +175,11 @@ struct ManagerChatView: View {
         .task {
             // For screenshots and tests: images and words waiting in the box.
             let environment = ProcessInfo.processInfo.environment
-            if let paths = environment["AGENTMAN_ATTACH"], attachments.isEmpty {
-                attachments = paths.split(separator: ":").compactMap { Attachments.make(file: URL(fileURLWithPath: String($0))) }
+            if let paths = environment["AGENTMAN_ATTACH"], composer.attachments.isEmpty {
+                composer.attachments = paths.split(separator: ":").compactMap { Attachments.make(file: URL(fileURLWithPath: String($0))) }
             }
-            if let text = environment["AGENTMAN_DRAFT"], draft.isEmpty {
-                draft = text.replacingOccurrences(of: "\\n", with: "\n")
+            if let text = environment["AGENTMAN_DRAFT"], composer.draft.isEmpty {
+                composer.draft = text.replacingOccurrences(of: "\\n", with: "\n")
             }
         }
     }
@@ -215,23 +191,81 @@ struct ManagerChatView: View {
 
     private func send(_ text: String) {
         var message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty || !attachments.isEmpty, !sending else { return }
+        guard !message.isEmpty || !composer.attachments.isEmpty, !composer.sending else { return }
         // Files named with @ in the editor, by their full paths, for
         // Agentman to pass on.
         if let mentions { message = mentions.resolve(message, folder: nil) }
-        sending = true
+        composer.sending = true
         followRequest += 1
-        let images = attachments
+        let images = composer.attachments
         let quoted = quotes.wrappedValue.map(\.text)
         message = ReplyQuotes.message(quoted, words: message)
         Task {
             if await manager.send(message, images: images) {
-                draft = ""
-                attachments = []
+                composer.draft = ""
+                composer.attachments = []
                 quotes.wrappedValue = []
             }
-            sending = false
+            composer.sending = false
         }
+    }
+}
+
+/// Composer state kept apart from ManagerChatView's body so typing never
+/// invalidates the conversation list or its Markdown views, while preserving
+/// drafts across the welcome-to-conversation transition.
+@MainActor @Observable
+private final class ManagerComposerState {
+    var draft = ""
+    var attachments: [Attachment] = []
+    var sending = false
+
+    func appendAttachments(_ found: [Attachment]) {
+        let room = Attachments.maxCount - attachments.count
+        attachments.append(contentsOf: found.prefix(max(0, room)))
+    }
+}
+
+private struct ManagerEntrySurface: View {
+    @Bindable var composer: ManagerComposerState
+    @Binding var dropping: Bool
+    var send: () -> Void
+
+    var body: some View {
+        EntryHero(draft: $composer.draft, attachments: $composer.attachments, dropping: $dropping, sending: composer.sending, send: send)
+    }
+}
+
+private struct ManagerComposerBar: View {
+    @Environment(AgentsStore.self) private var store
+    @Bindable var composer: ManagerComposerState
+    var quotes: Binding<[ReplyQuote]>
+    @Binding var dropping: Bool
+    let gutter: CGFloat
+    var send: () -> Void
+
+    var body: some View {
+        let manager = store.manager
+        VStack(spacing: 8) {
+            if store.status != .connected || manager.needsKey {
+                // Agentman can't take a message yet: the box
+                // says why, as on the entry page.
+                ManagerBox(draft: $composer.draft, attachments: $composer.attachments, dropping: $dropping, sending: composer.sending, send: send)
+            } else {
+                ManagerComposer(text: $composer.draft, attachments: $composer.attachments, quotes: quotes, thinking: manager.thinking, sending: composer.sending,
+                                onDropTargeted: { dropping = $0 }, onSend: send) {
+                    manager.stop()
+                }
+                .modifier(ComposerFeedback(message: manager.problem, radius: 22) {
+                    manager.problem = nil
+                })
+            }
+        }
+        .padding(.horizontal, gutter)
+        .padding(.top, 4)
+        .padding(.bottom, 22)
+        .frame(maxWidth: AgentThreadView.column)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -499,6 +533,7 @@ private struct AssistantReply: View {
                     ThinkingDots()
                 } else {
                     MarkdownView(entry.text)
+                        .equatable()
                         .quotable()
                 }
             }

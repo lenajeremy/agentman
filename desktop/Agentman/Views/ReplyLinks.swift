@@ -104,10 +104,18 @@ enum ReplyLinks {
         }
     }
 
+    /// Cached OpenURLAction per folder so re-rendering a thread doesn't
+    /// construct a fresh closure and invalidate EnvironmentValues.openURL on
+    /// every child view.
+    @MainActor private static var finderActions: [String: OpenURLAction] = [:]
+
     /// Opening links in a reply outside the editor: a file or folder in
     /// Finder.
+    @MainActor
     static func finder(folder: String?) -> OpenURLAction {
-        OpenURLAction { url in
+        let key = folder ?? ""
+        if let cached = finderActions[key] { return cached }
+        let action = OpenURLAction { url in
             switch decide(url, folder: folder) {
             case .file(let target):
                 showInFinder(target)
@@ -118,6 +126,9 @@ enum ReplyLinks {
                 return .systemAction
             }
         }
+        if finderActions.count > 64 { finderActions.removeAll(keepingCapacity: true) }
+        finderActions[key] = action
+        return action
     }
 
     /// What following a link does.

@@ -13,10 +13,10 @@ struct AgentThreadView: View {
     var inPanel = false
     /// What "4 files changed" does in an editor: its changes fill the editor.
     var openChanges: (() -> Void)? = nil
-    @State private var draft = ""
-    @State private var attachments: [Attachment] = []
+    /// Composer state kept apart from AgentThreadView's body so typing never
+    /// re-evaluates the conversation, panels, or header.
+    @State private var composer = ThreadComposerState()
     @State private var dropping = false
-    @State private var sending = false
     /// Whether the thread is scrolled to its end, so new messages follow
     /// on; scrolled up, nothing moves what the user is reading.
     @State private var following = Following()
@@ -56,9 +56,6 @@ struct AgentThreadView: View {
     /// The agent's folder's files, for `@`, where no editor is around.
     @State private var folderMentions: FileMentions?
     private var mentions: FileMentions? { editorMentions ?? folderMentions }
-    /// What a panel command showed, in a sheet, and whether one is being read.
-    @State private var panel: CommandPanel?
-    @State private var readingPanel = false
     /// The find bar, while it is open, and the message it last scrolled to.
     @State private var finding: Finding?
     @State private var scrollTarget: ScrollTarget?
@@ -294,148 +291,152 @@ struct AgentThreadView: View {
                 .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
             }
-            ScrollViewReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    let items = store.threadItems(session.id)
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        if store.hasMore[session.id] == true {
-                            LoadingEarlier()
-                        }
-                        ForEach(items) { item in
-                            Group {
-                                switch item {
-                                case .message(let message):
-                                    MessageRow(message: message)
-                                case .tools(let calls, let said):
-                                    ToolRun(calls: calls, said: said)
-                                case .image(_, let path):
-                                    ImageThumbnail(sessionId: session.id, path: path,
-                                                   label: "Read " + (path as NSString).lastPathComponent, carded: true)
-                                case .images(let calls, let paths, let said):
-                                    PicturesRun(sessionId: session.id, calls: calls, paths: paths, said: said)
-                                case .worked(_, let seconds, let steps):
-                                    WorkedLine(seconds: seconds, steps: steps)
+            ZStack {
+                if isEmpty {
+                    EmptyThread(session: session)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            let items = store.threadItems(session.id)
+                            LazyVStack(alignment: .leading, spacing: 24) {
+                                if store.hasMore[session.id] == true {
+                                    LoadingEarlier()
                                 }
+                                ForEach(items) { item in
+                                    Group {
+                                        switch item {
+                                        case .message(let message):
+                                            MessageRow(message: message)
+                                        case .tools(let calls, let said):
+                                            ToolRun(calls: calls, said: said)
+                                        case .image(_, let path):
+                                            ImageThumbnail(sessionId: session.id, path: path,
+                                                           label: "Read " + (path as NSString).lastPathComponent, carded: true)
+                                        case .images(let calls, let paths, let said):
+                                            PicturesRun(sessionId: session.id, calls: calls, paths: paths, said: said)
+                                        case .worked(_, let seconds, let steps):
+                                            WorkedLine(seconds: seconds, steps: steps)
+                                        }
+                                    }
+                                    .onAppear { if !rowsDrawn { rowsDrawn = true } }
+                                    .id(item.id)
+                                    .firstMessage(item.id, if: item.id == items.first?.id)
+                                }
+                                LatestTurnLine(session: session)
+                                ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
+                                    QueuedBubble(text: text, note: "Waiting for the agent to read it",
+                                                 onSendNow: canSendNow ? { await store.sendQueuedNow(session.id) } : nil)
+                                }
+                                ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, message in
+                                    QueuedBubble(text: message.label, note: "Queued: it reaches the agent when its turn ends")
+                                }
+                                // The question is part of the conversation, so it
+                                // scrolls with it and is never squeezed to fit.
+                                if let question = session.question {
+                                    QuestionCard(session: session, question: question)
+                                        .id("question")
+                                }
+                                // Below the last message, so following the thread
+                                // keeps room above the composer.
+                                Color.clear.frame(height: 1).id("end")
                             }
-                            .onAppear { if !rowsDrawn { rowsDrawn = true } }
-                            .id(item.id)
-                            .firstMessage(item.id, if: item.id == items.first?.id)
+                            .padding(.horizontal, gutter)
+                            .padding(.top, 24)
+                            .padding(.bottom, 6)
+                            .frame(maxWidth: Self.column)
+                            .frame(maxWidth: .infinity)
+                            .environment(\.imageGallery, ThreadItem.pictures(in: items))
+                            .environment(\.liveLimitNotice, TurnNotice.live(in: store.messages[session.id] ?? [], limit: session.limit))
+                            .environment(\.threadFolder, session.cwd)
+                            .modifier(FinderLinks(folder: session.cwd, applies: !inPanel))
+                            .environment(\.threadSkills, slash?.skills ?? [])
+                            .environment(\.findMarks, finding?.marks)
                         }
-                        LatestTurnLine(session: session)
-                        ForEach(Array((session.queued ?? []).enumerated()), id: \.offset) { _, text in
-                            QueuedBubble(text: text, note: "Waiting for the agent to read it",
-                                         onSendNow: canSendNow ? { await store.sendQueuedNow(session.id) } : nil)
+                        .scrollIndicators(.never)
+                        .offersQuotes(when: session.canReceive && session.question == nil) { text in
+                            store.replyQuotes[session.id, default: []].append(ReplyQuote(text: text))
                         }
-                        ForEach(Array((store.queued[session.id] ?? []).enumerated()), id: \.offset) { _, message in
-                            QueuedBubble(text: message.label, note: "Queued: it reaches the agent when its turn ends")
+                        .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
+                        .modifier(TopFade())
+                        .overlay(alignment: .bottom) {
+                            JumpToLatestOverlay(following: following, hidden: false) {
+                                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+                            }
                         }
-                        // The question is part of the conversation, so it
-                        // scrolls with it and is never squeezed to fit.
-                        if let question = session.question {
-                            QuestionCard(session: session, question: question)
-                                .id("question")
+                        .onChange(of: store.messages[session.id]?.last?.id) { old, last in
+                            guard old != nil, last != nil, following.atEnd else { return }
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("end", anchor: .bottom)
+                            }
                         }
-                        // Below the last message, so following the thread
-                        // keeps room above the composer.
-                        Color.clear.frame(height: 1).id("end")
-                    }
-                    .padding(.horizontal, gutter)
-                    .padding(.top, 24)
-                    .padding(.bottom, 6)
-                    .frame(maxWidth: Self.column)
-                    .frame(maxWidth: .infinity)
-                    .environment(\.imageGallery, ThreadItem.pictures(in: items))
-                    .environment(\.liveLimitNotice, TurnNotice.live(in: store.messages[session.id] ?? [], limit: session.limit))
-                    .environment(\.threadFolder, session.cwd)
-                    .modifier(FinderLinks(folder: session.cwd, applies: !inPanel))
-                    .environment(\.threadSkills, slash?.skills ?? [])
-                    .environment(\.findMarks, finding?.marks)
-                }
-                .scrollIndicators(.never)
-                .id(rebuilds)
-                .task(id: (store.messages[session.id]?.isEmpty ?? true) ? "" : session.id) {
-                    guard store.messages[session.id]?.isEmpty == false else { return }
-                    await drawOrRebuild()
-                }
-                .offersQuotes(when: session.canReceive && session.question == nil) { text in
-                    store.replyQuotes[session.id, default: []].append(ReplyQuote(text: text))
-                }
-                .modifier(FollowsEnd(following: following, earlier: store.hasMore[session.id] == true ? { await store.loadOlder(session.id) } : nil))
-                .modifier(TopFade())
-                .overlay {
-                    if isEmpty { EmptyThread(session: session) }
-                }
-                .overlay(alignment: .bottom) {
-                    JumpToLatestOverlay(following: following, hidden: isEmpty) {
-                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
-                    }
-                }
-                .overlay {
-                    if dropping { DropTarget(label: "Drop images for \(session.name)") }
-                }
-                .overlay(alignment: .topTrailing) {
-                    FindBar(finding: $finding, previous: { step(-1) }, next: { step(1) })
-                        .padding(.top, 10)
-                        .padding(.trailing, 16)
-                }
-                .onChange(of: store.messages[session.id]?.last?.id) { _, last in
-                    guard last != nil, following.atEnd else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("end", anchor: .bottom)
-                    }
-                }
-                .onChange(of: session.question?.id) { _, id in
-                    guard id != nil, following.atEnd else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("end", anchor: .bottom)
-                    }
-                }
-                .onChange(of: followRequest) { _, _ in
-                    following.atEnd = true
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("end", anchor: .bottom)
-                    }
-                }
-                .onChange(of: scrollTarget) { _, target in
-                    guard let target else { return }
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        proxy.scrollTo(target.id, anchor: .center)
-                    }
-                }
-                // Opened from a search: at the message, its words found.
-                .task(id: store.jump?.serial) {
-                    guard let jump = store.jump, jump.sessionId == session.id else { return }
-                    store.jump = nil
-                    finding = Finding(query: jump.query)
-                    let matches = await store.searchThread(session.id, query: jump.query)
-                    finding = Finding(query: jump.query, searched: jump.query, matches: matches,
-                                      index: matches.firstIndex { $0.messageId == jump.messageId })
-                    await reveal(jump.messageId)
-                }
-                // Typed into the find bar: the whole conversation searched a
-                // moment after typing stops, the newest match shown.
-                .task(id: finding?.query) {
-                    guard let query = finding?.query, query != finding?.searched else { return }
-                    try? await Task.sleep(for: .milliseconds(200))
-                    guard !Task.isCancelled else { return }
-                    let matches = await store.searchThread(session.id, query: query)
-                    guard !Task.isCancelled, finding?.query == query else { return }
-                    finding?.searched = query
-                    finding?.matches = matches
-                    finding?.index = matches.isEmpty ? nil : matches.count - 1
-                    if let last = matches.last { await reveal(last.messageId) }
-                }
-                .background {
-                    // ⌘F finds in the conversation; not in an editor's
-                    // panel, where the editor's own find has it.
-                    if !inPanel {
-                        Button("Find in Conversation") {
-                            if finding == nil { finding = Finding(query: "") }
+                        .onChange(of: session.question?.id) { _, id in
+                            guard id != nil, following.atEnd else { return }
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("end", anchor: .bottom)
+                            }
                         }
-                        .keyboardShortcut("f", modifiers: .command)
-                        .opacity(0)
-                        .accessibilityHidden(true)
+                        .onChange(of: followRequest) { _, _ in
+                            following.atEnd = true
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("end", anchor: .bottom)
+                            }
+                        }
+                        .onChange(of: scrollTarget, initial: true) { _, target in
+                            guard let target else { return }
+                            withAnimation(.easeOut(duration: 0.25)) {
+                                proxy.scrollTo(target.id, anchor: .center)
+                            }
+                        }
                     }
+                    .id(rebuilds)
+                    .task(id: (store.messages[session.id]?.isEmpty ?? true) ? "" : session.id) {
+                        guard store.messages[session.id]?.isEmpty == false else { return }
+                        await drawOrRebuild()
+                    }
+                }
+            }
+            .overlay {
+                if dropping { DropTarget(label: "Drop images for \(session.name)") }
+            }
+            .overlay(alignment: .topTrailing) {
+                FindBar(finding: $finding, previous: { step(-1) }, next: { step(1) })
+                    .padding(.top, 10)
+                    .padding(.trailing, 16)
+            }
+            // Opened from a search: at the message, its words found.
+            .task(id: store.jump?.serial) {
+                guard let jump = store.jump, jump.sessionId == session.id else { return }
+                store.jump = nil
+                finding = Finding(query: jump.query)
+                let matches = await store.searchThread(session.id, query: jump.query)
+                finding = Finding(query: jump.query, searched: jump.query, matches: matches,
+                                  index: matches.firstIndex { $0.messageId == jump.messageId })
+                await reveal(jump.messageId)
+            }
+            // Typed into the find bar: the whole conversation searched a
+            // moment after typing stops, the newest match shown.
+            .task(id: finding?.query) {
+                guard let query = finding?.query, query != finding?.searched else { return }
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                let matches = await store.searchThread(session.id, query: query)
+                guard !Task.isCancelled, finding?.query == query else { return }
+                finding?.searched = query
+                finding?.matches = matches
+                finding?.index = matches.isEmpty ? nil : matches.count - 1
+                if let last = matches.last { await reveal(last.messageId) }
+            }
+            .background {
+                // ⌘F finds in the conversation; not in an editor's
+                // panel, where the editor's own find has it.
+                if !inPanel {
+                    Button("Find in Conversation") {
+                        if finding == nil { finding = Finding(query: "") }
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .opacity(0)
+                    .accessibilityHidden(true)
                 }
             }
 
@@ -452,19 +453,14 @@ struct AgentThreadView: View {
                     // Started in a terminal: taken over, it is messaged here.
                     TakeOverBar(session: session, moving: moving) { confirmTakeOver = true }
                 } else {
-                Composer(
-                    mentions: mentions,
-                    text: $draft,
-                    attachments: session.canReceive ? $attachments : nil,
-                    quotes: quotes,
-                    session: session,
-                    placeholder: placeholder,
-                    enabled: session.canReceive && !sending && !readingPanel && store.status == .connected
-                        && (session.question == nil || session.question?.takesTypedAnswer == true),
-                    slash: slash,
-                    onDropTargeted: { dropping = $0 },
-                    onSend: send
-                )
+                    ThreadComposerBar(
+                        composer: composer,
+                        session: session,
+                        mentions: mentions,
+                        slash: slash,
+                        onDropTargeted: { dropping = $0 },
+                        onFollowEnd: { followRequest += 1 }
+                    )
                 }
             }
             .modifier(ComposerFeedback(message: store.actionError[session.id]) {
@@ -477,9 +473,6 @@ struct AgentThreadView: View {
             .frame(maxWidth: Self.column)
             .frame(maxWidth: .infinity)
         }
-        // An unsent draft waits for the user's return, as on the phone.
-        .onAppear { draft = store.drafts[session.id] ?? "" }
-        .onChange(of: draft) { _, now in store.saveDraft(now, for: session.id) }
         // "Review document" on the Board's card.
         .task(id: store.documentsRequest == session.id) {
             guard store.documentsRequest == session.id else { return }
@@ -504,9 +497,6 @@ struct AgentThreadView: View {
             // Read now, for the skills the conversation's messages name.
             slash?.prefetch()
         }
-        .sheet(item: Binding(get: { panel.map(PanelItem.init) }, set: { panel = $0?.panel })) { item in
-            CommandPanelSheet(panel: item.panel)
-        }
         // The count is read when the thread opens and after each turn.
         .task(id: session.state == .busy) {
             guard session.state != .busy else { return }
@@ -519,7 +509,7 @@ struct AgentThreadView: View {
             guard session.canReceive else { return false }
             Task { @MainActor in
                 let found = await Attachments.from(providers: providers, files: true)
-                attachments.append(contentsOf: found.prefix(max(0, Attachments.maxCount - attachments.count)))
+                composer.appendAttachments(found)
             }
             return true
         }
@@ -644,6 +634,7 @@ struct AgentThreadView: View {
             try? await Task.sleep(for: .milliseconds(900))
             if Task.isCancelled || rowsDrawn { return }
             Self.log.notice("\(session.kind, privacy: .public) chat has messages but drew none; building it again")
+            following = Following()
             rebuilds += 1
         }
     }
@@ -653,6 +644,54 @@ struct AgentThreadView: View {
     private var isEmpty: Bool {
         (store.messages[session.id] ?? []).isEmpty && (session.queued ?? []).isEmpty &&
             (store.queued[session.id] ?? []).isEmpty && session.question == nil
+    }
+}
+
+/// Composer state owned separately from AgentThreadView's body so each
+/// keystroke invalidates only ThreadComposerBar, leaving the conversation,
+/// header, and side panels untouched.
+@MainActor @Observable
+private final class ThreadComposerState {
+    var draft = ""
+    var attachments: [Attachment] = []
+    var sending = false
+    var readingPanel = false
+    var panel: CommandPanel?
+
+    func appendAttachments(_ found: [Attachment]) {
+        attachments.append(contentsOf: found.prefix(max(0, Attachments.maxCount - attachments.count)))
+    }
+}
+
+private struct ThreadComposerBar: View {
+    @Environment(AgentsStore.self) private var store
+    @Bindable var composer: ThreadComposerState
+    let session: Session
+    let mentions: FileMentions?
+    let slash: SlashCommands?
+    let onDropTargeted: (Bool) -> Void
+    let onFollowEnd: () -> Void
+
+    var body: some View {
+        Composer(
+            mentions: mentions,
+            text: $composer.draft,
+            attachments: session.canReceive ? $composer.attachments : nil,
+            quotes: quotes,
+            session: session,
+            placeholder: placeholder,
+            enabled: session.canReceive && !composer.sending && !composer.readingPanel && store.status == .connected
+                && (session.question == nil || session.question?.takesTypedAnswer == true),
+            slash: slash,
+            onDropTargeted: onDropTargeted,
+            onSend: send
+        )
+        // An unsent draft waits for the user's return, as on the phone.
+        .onAppear { composer.draft = store.drafts[session.id] ?? "" }
+        .onChange(of: composer.draft) { _, now in store.saveDraft(now, for: session.id) }
+        .sheet(item: Binding(get: { composer.panel.map(PanelItem.init) }, set: { composer.panel = $0?.panel })) { item in
+            CommandPanelSheet(panel: item.panel)
+        }
     }
 
     private var placeholder: String {
@@ -680,34 +719,34 @@ struct AgentThreadView: View {
     }
 
     private func send() {
-        var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty else { return }
+        var text = composer.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !composer.attachments.isEmpty else { return }
         // While a question takes a typed answer, what is typed is the answer.
         if let question = session.question, question.takesTypedAnswer {
             guard !text.isEmpty else { return }
-            sending = true
+            composer.sending = true
             Task {
-                if await store.answer(session.id, question: question, reply: QuestionReply(text: text)) { draft = "" }
-                sending = false
+                if await store.answer(session.id, question: question, reply: QuestionReply(text: text)) { composer.draft = "" }
+                composer.sending = false
             }
             return
         }
         // A panel command sent bare is read off the agent's terminal, since it
         // never reaches the transcript; a bare /model would leave a picker
         // open there.
-        if let slash, attachments.isEmpty {
+        if let slash, composer.attachments.isEmpty {
             switch SlashCommands.send(text, commands: slash.commands) {
             case .panel(let name):
-                readingPanel = true
+                composer.readingPanel = true
                 Task {
                     switch await store.commandPanel(name, in: session.id) {
                     case .success(let shown):
-                        draft = ""
-                        panel = shown
+                        composer.draft = ""
+                        composer.panel = shown
                     case .failure(let problem):
                         store.actionError[session.id] = problem.message
                     }
-                    readingPanel = false
+                    composer.readingPanel = false
                 }
                 return
             case .model:
@@ -719,10 +758,10 @@ struct AgentThreadView: View {
         }
         // Files named with @ in the editor, by a path the agent can open.
         if let mentions { text = mentions.resolve(text, folder: session.cwd) }
-        sending = true
-        followRequest += 1
-        let images = Attachments.encoded(attachments)
-        let files = attachments.compactMap(\.file)
+        composer.sending = true
+        onFollowEnd()
+        let images = Attachments.encoded(composer.attachments)
+        let files = composer.attachments.compactMap(\.file)
         Task {
             // Files are named ahead of the words, as the phone sends them.
             var references: [String] = []
@@ -731,7 +770,7 @@ struct AgentThreadView: View {
                 case .success(let path): references.append("@" + path)
                 case .failure(let problem):
                     store.actionError[session.id] = problem.message
-                    sending = false
+                    composer.sending = false
                     return
                 }
             }
@@ -741,11 +780,11 @@ struct AgentThreadView: View {
             let message = references.isEmpty ? words
                 : references.joined(separator: " ") + (words.isEmpty ? "" : "\n\n" + words)
             if await store.send(message, images: images, to: session.id) {
-                draft = ""
-                attachments = []
+                composer.draft = ""
+                composer.attachments = []
                 if !quoted.isEmpty { quotes.wrappedValue = [] }
             }
-            sending = false
+            composer.sending = false
         }
     }
 
@@ -2266,6 +2305,7 @@ private struct AgentReply: View {
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             MarkdownView(text)
+                .equatable()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .quotable()
             Button {
