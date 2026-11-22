@@ -14,6 +14,21 @@
     <description>Updates to Agentman for Mac.</description>
     <language>en</language>
     <item>
+      <title>Agentman 0.49.1</title>
+      <link>https://github.com/lenajeremy/agentman/releases/tag/v0.49.1</link>
+      <pubDate>Sun, 22 Nov 2026 11:01:50 GMT</pubDate>
+      <sparkle:version>59</sparkle:version>
+      <sparkle:shortVersionString>0.49.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:fullReleaseNotesLink>https://github.com/lenajeremy/agentman/releases/tag/v0.49.1</sparkle:fullReleaseNotesLink>
+      <description sparkle:format="markdown"><![CDATA[## Faster, smoother chats
+
+- **No more blank chats on open.** Switching to a conversation before its messages arrive now renders immediately at the latest message without needing to resize the sidebar or click away and back.
+- **Much smoother scrolling and typing.** Replies now stay rasterized across scroll frames instead of redrawing on every scroll step, and typing in the message box no longer re-renders the conversation above it.
+- **Reliable Reply quotes and sidebar position.** Selecting text on the first drag reliably shows the Reply popup, and switching chats leaves the sidebar right where you left it.]]></description>
+      <enclosure url="https://github.com/lenajeremy/agentman/releases/download/v0.49.1/Agentman.dmg" length="46603114" type="application/octet-stream" sparkle:edSignature="DUwPgSGFYVFOJN+BLwBfZJnf32K1Ulrfo6lf0DtnGp1w8H673RW6jc9ZjCQQDlhA8gImTecwVKT3w4DmWJC0AQ=="/>
+    </item>
+    <item>
       <title>Agentman 0.48.0</title>
       <link>https://github.com/lenajeremy/agentman/releases/tag/v0.48.0</link>
       <pubDate>Thu, 19 Nov 2026 08:45:47 GMT</pubDate>
